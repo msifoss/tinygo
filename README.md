@@ -9,6 +9,8 @@ TinyGo is a command-line tool that wraps the tiiny.host API, giving you fast, sc
 ## Features
 
 - **One-command deploys** — push an HTML file or zip to a live URL in seconds
+- **Bundle mode** — `--bundle` scans your HTML for linked local files, rewrites paths, and deploys everything as a zip
+- **Deployment log** — every deploy, update, and delete is recorded; view history with `tinygo log`
 - **Full lifecycle management** — deploy, update, and delete sites without leaving the terminal
 - **Interactive prompts** — missing a domain name? TinyGo asks. Deleting a site? TinyGo confirms
 - **Password protection** — lock down any site with `--password`
@@ -114,6 +116,28 @@ Output:
 Deployed! https://my-portfolio.tiiny.site
 ```
 
+### Bundle deploy
+
+When your HTML references local files (stylesheets, scripts, images, other HTML pages — even from different directories), `--bundle` scans for them, copies everything into a zip with rewritten paths, and deploys it:
+
+```bash
+tinygo deploy index.html --domain summit-deck --bundle
+```
+
+What happens under the hood:
+1. Parses `index.html` for `href`, `src`, and CSS `url()` references
+2. Recursively scans any linked HTML files for their own dependencies
+3. Copies everything into a temp staging directory
+4. Rewrites absolute paths (e.g. `/Users/you/other-repo/report.html`) to relative paths
+5. Zips and deploys, then cleans up temp files
+
+Relative paths preserve their directory structure. Absolute paths are flattened into the staging root with automatic collision avoidance. Remote URLs (`http://`, `https://`), data URIs, and anchors are left untouched. Missing files are silently skipped.
+
+```bash
+# Also works with update
+tinygo update index.html --domain summit-deck --bundle
+```
+
 ### Update an existing site
 
 ```bash
@@ -173,17 +197,45 @@ max file size: 75 MB
 domains: tiiny.site
 ```
 
+### View deployment history
+
+Every deploy, update, and delete (success or failure) is automatically logged to `~/.tinygo/deployments.log`.
+
+```bash
+# Show full history
+tinygo log
+
+# Show last 5 entries
+tinygo log -n 5
+
+# Clear the log
+tinygo log --clear
+```
+
+Output:
+
+```
+                         Deployment History
+┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Timestamp           ┃ Action ┃ Status  ┃ Domain         ┃ File       ┃ Size  ┃ Detail                           ┃
+┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ 2026-03-01 14:23:05 │ DEPLOY │ SUCCESS │ my-site        │ index.html │ 12.4KB│ https://my-site.tiiny.site       │
+│ 2026-03-01 14:30:00 │ DELETE │ SUCCESS │ my-site        │            │       │                                  │
+└─────────────────────┴────────┴─────────┴────────────────┴────────────┴───────┴──────────────────────────────────┘
+```
+
 ---
 
 ## Command Reference
 
 | Command | Description | Key Options |
 |---------|-------------|-------------|
-| `tinygo deploy <file>` | Deploy a new site | `--domain`, `--password`, `--api-key` |
-| `tinygo update <file>` | Update an existing site | `--domain` (required), `--password`, `--api-key` |
+| `tinygo deploy <file>` | Deploy a new site | `--domain`, `--password`, `--bundle`, `--api-key` |
+| `tinygo update <file>` | Update an existing site | `--domain` (required), `--password`, `--bundle`, `--api-key` |
 | `tinygo delete` | Delete a site | `--domain` (required), `--yes`, `--api-key` |
 | `tinygo list` | List all sites with quota | `--api-key` |
 | `tinygo profile` | Show account info | `--api-key` |
+| `tinygo log` | Show deployment history | `-n` (tail), `--clear` |
 | `tinygo config set-key` | Save API key interactively | — |
 | `tinygo config show` | Display current config | — |
 
@@ -205,7 +257,9 @@ tinygo/
     ├── __init__.py      # Version string
     ├── cli.py           # Click command definitions and Rich output
     ├── api.py           # TiinyClient — HTTP wrapper around tiiny.host API
-    └── config.py        # Config file I/O and API key resolution
+    ├── config.py        # Config file I/O and API key resolution
+    ├── bundle.py        # HTML scanning, file staging, path rewriting, zip creation
+    └── log.py           # Deployment event logging (write, read, clear)
 ```
 
 ### How it works
@@ -227,6 +281,10 @@ flowchart LR
 **`api.py`** contains `TiinyClient`, a thin wrapper over the four tiiny.host API endpoints. It manages the `requests.Session`, multipart form-data encoding, domain normalization (appending `.tiiny.site`), and error handling via `TiinyError`.
 
 **`config.py`** reads and writes `~/.tinygo/config.json` and implements the three-tier API key resolution (flag > env > file).
+
+**`bundle.py`** scans HTML files for local file references (`href`, `src`, CSS `url()`), recursively follows linked HTML, copies everything into a temp staging directory with rewritten paths, and produces a deployable zip.
+
+**`log.py`** appends tab-separated deployment events to `~/.tinygo/deployments.log` and provides read/clear functions for the `tinygo log` command.
 
 ### API Endpoints Used
 

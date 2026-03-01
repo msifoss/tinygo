@@ -5,7 +5,9 @@ from rich.console import Console
 from rich.table import Table
 
 from tinygo.api import TiinyClient, TiinyError
+from tinygo.bundle import cleanup_bundle, create_bundle
 from tinygo.config import get_api_key, get_config, mask_key, set_api_key
+from tinygo.log import clear_log, log_event, read_log
 
 console = Console()
 
@@ -35,21 +37,37 @@ def main():
 @click.argument("file", type=click.Path(exists=True))
 @click.option("--domain", "-d", default=None, help="Subdomain for the site.")
 @click.option("--password", "-p", default=None, help="Password-protect the site.")
+@click.option("--bundle", "-b", is_flag=True, help="Bundle linked local files into a zip.")
 @click.option("--api-key", default=None, envvar="TIINY_API_KEY", help="API key override.")
-def deploy(file, domain, password, api_key):
+def deploy(file, domain, password, bundle, api_key):
     """Deploy a file or zip to a new tiiny.host site."""
     if not domain:
         domain = click.prompt("Choose a subdomain")
     client = _get_client(api_key)
-    with console.status("Deploying..."):
-        try:
-            result = client.create(file, domain=domain, password=password)
-        except TiinyError as e:
-            console.print(f"[red]Deploy failed:[/red] {e.detail}")
-            raise SystemExit(1)
-    data = result.get("data", result)
-    link = data.get("link", domain)
-    console.print(f"[green]Deployed![/green] https://{link}")
+
+    deploy_file = file
+    zip_path = None
+    try:
+        if bundle:
+            with console.status("Bundling..."):
+                zip_path = create_bundle(file)
+            deploy_file = str(zip_path)
+
+        with console.status("Deploying..."):
+            try:
+                result = client.create(deploy_file, domain=domain, password=password)
+            except TiinyError as e:
+                log_event("DEPLOY", domain, success=False, file_path=file, error=e.detail)
+                console.print(f"[red]Deploy failed:[/red] {e.detail}")
+                raise SystemExit(1)
+        data = result.get("data", result)
+        link = data.get("link", domain)
+        url = f"https://{link}"
+        log_event("DEPLOY", domain, success=True, file_path=file, url=url)
+        console.print(f"[green]Deployed![/green] {url}")
+    finally:
+        if zip_path:
+            cleanup_bundle(zip_path)
 
 
 # ── update ───────────────────────────────────────────────────────────────
@@ -59,19 +77,35 @@ def deploy(file, domain, password, api_key):
 @click.argument("file", type=click.Path(exists=True))
 @click.option("--domain", "-d", required=True, help="Subdomain to update.")
 @click.option("--password", "-p", default=None, help="Password-protect the site.")
+@click.option("--bundle", "-b", is_flag=True, help="Bundle linked local files into a zip.")
 @click.option("--api-key", default=None, envvar="TIINY_API_KEY", help="API key override.")
-def update(file, domain, password, api_key):
+def update(file, domain, password, bundle, api_key):
     """Update an existing tiiny.host site with new content."""
     client = _get_client(api_key)
-    with console.status("Updating..."):
-        try:
-            result = client.update(file, domain, password=password)
-        except TiinyError as e:
-            console.print(f"[red]Update failed:[/red] {e.detail}")
-            raise SystemExit(1)
-    data = result.get("data", result)
-    link = data.get("link", domain)
-    console.print(f"[green]Updated![/green] https://{link}")
+
+    update_file = file
+    zip_path = None
+    try:
+        if bundle:
+            with console.status("Bundling..."):
+                zip_path = create_bundle(file)
+            update_file = str(zip_path)
+
+        with console.status("Updating..."):
+            try:
+                result = client.update(update_file, domain, password=password)
+            except TiinyError as e:
+                log_event("UPDATE", domain, success=False, file_path=file, error=e.detail)
+                console.print(f"[red]Update failed:[/red] {e.detail}")
+                raise SystemExit(1)
+        data = result.get("data", result)
+        link = data.get("link", domain)
+        url = f"https://{link}"
+        log_event("UPDATE", domain, success=True, file_path=file, url=url)
+        console.print(f"[green]Updated![/green] {url}")
+    finally:
+        if zip_path:
+            cleanup_bundle(zip_path)
 
 
 # ── delete ───────────────────────────────────────────────────────────────
@@ -90,8 +124,10 @@ def delete(domain, yes, api_key):
         try:
             client.delete(domain)
         except TiinyError as e:
+            log_event("DELETE", domain, success=False, error=e.detail)
             console.print(f"[red]Delete failed:[/red] {e.detail}")
             raise SystemExit(1)
+    log_event("DELETE", domain, success=True)
     console.print(f"[green]Deleted[/green] {domain}")
 
 
@@ -155,6 +191,47 @@ def profile(api_key):
     domains = profile_data.get("customDomains", [])
     if domains:
         console.print(f"[bold]domains:[/bold] {', '.join(domains)}")
+
+
+# ── log ──────────────────────────────────────────────────────────────
+
+
+@main.command(name="log")
+@click.option("-n", "--tail", default=None, type=int, help="Show only the last N entries.")
+@click.option("--clear", is_flag=True, help="Clear the deployment log.")
+def log_cmd(tail, clear):
+    """Show deployment history."""
+    if clear:
+        clear_log()
+        console.print("[green]Log cleared.[/green]")
+        return
+
+    lines = read_log(tail=tail)
+    if not lines:
+        console.print("[dim]No deployment history.[/dim]")
+        return
+
+    table = Table(title="Deployment History")
+    table.add_column("Timestamp", style="dim")
+    table.add_column("Action", style="bold")
+    table.add_column("Status")
+    table.add_column("Domain", style="cyan")
+    table.add_column("File", style="dim")
+    table.add_column("Size", style="dim")
+    table.add_column("Detail")
+
+    for line in lines:
+        parts = line.split("\t")
+        # Pad to 7 columns if needed.
+        while len(parts) < 7:
+            parts.append("")
+        timestamp, action, status, domain, file_col, size_col, detail = parts[:7]
+        status_styled = (
+            f"[green]{status}[/green]" if status == "SUCCESS" else f"[red]{status}[/red]"
+        )
+        table.add_row(timestamp, action, status_styled, domain, file_col, size_col, detail)
+
+    console.print(table)
 
 
 # ── config ───────────────────────────────────────────────────────────────
