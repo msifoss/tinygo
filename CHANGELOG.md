@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-01
+
+### Added
+- Auto-generated 15-character password on every deploy and update (cryptographically strong via `secrets`)
+- `noIndex` flag set on all deployments to block search engine indexing
+- Password displayed in console output after successful deploy/update
+- 3 new tests for password generation (length, character set, uniqueness)
+
+### Changed
+- `create()` and `update()` now return `(response_dict, password_used)` tuple
+- `siteSettings` always includes `passwordProtected`, `password`, and `noIndex`
+- Password is never written to the deployment log
+- Test count: 47 → 50
+
 ## [0.2.0] - 2026-03-01
 
 ### Changed
