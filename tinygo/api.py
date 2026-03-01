@@ -51,6 +51,7 @@ class TiinyClient:
         path = Path(file_path)
         site_settings: dict = {}
         if password:
+            site_settings["passwordProtected"] = True
             site_settings["password"] = password
 
         with open(path, "rb") as f:
@@ -75,6 +76,7 @@ class TiinyClient:
         path = Path(file_path)
         site_settings: dict = {}
         if password:
+            site_settings["passwordProtected"] = True
             site_settings["password"] = password
 
         with open(path, "rb") as f:
