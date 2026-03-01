@@ -59,7 +59,7 @@ Acceptance criteria use Given/When/Then format.
 **As a** developer, **I want** to save my API key once and have it persist, **so that** I don't have to pass it on every command.
 
 **Acceptance Criteria:**
-- Given I run `tinygo config set-key`, when I enter a key, then it is saved to `~/.tinygo/config.json`.
+- Given I run `tinygo config set-key`, when I enter a key, then it is saved to `~/.tinygo/.env`.
 - Given I have a saved key, when I run any command, then the saved key is used automatically.
 - Given I pass `--api-key` or set `TIINY_API_KEY`, when I run a command, then that key takes precedence.
 

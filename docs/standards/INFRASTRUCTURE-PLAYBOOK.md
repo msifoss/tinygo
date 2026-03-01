@@ -23,7 +23,7 @@ All outbound requests go to `https://ext.tiiny.host` over HTTPS. No inbound conn
 
 ## IAM Patterns
 
-- tiiny.host API key per user, stored in `~/.tinygo/config.json`
+- tiiny.host API key per user, stored in `~/.tinygo/.env`
 - GitHub repo access managed via GitHub settings
 
 ## Monitoring
