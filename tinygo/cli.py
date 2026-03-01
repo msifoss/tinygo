@@ -259,5 +259,13 @@ def config_show():
         console.print(f"[bold]api_key:[/bold] {mask_key(key)}")
     else:
         console.print("[dim]No API key configured.[/dim]")
-    from tinygo.config import CONFIG_FILE
-    console.print(f"[bold]config path:[/bold] {CONFIG_FILE}")
+
+    # Show YAML settings (excluding api_key which comes from .env)
+    settings = {k: v for k, v in cfg.items() if k != "api_key"}
+    if settings:
+        for k, v in settings.items():
+            console.print(f"[bold]{k}:[/bold] {v}")
+
+    from tinygo.config import ENV_FILE, CONFIG_YAML_FILE
+    console.print(f"[bold]secrets path:[/bold] {ENV_FILE}")
+    console.print(f"[bold]config path:[/bold] {CONFIG_YAML_FILE}")

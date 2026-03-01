@@ -12,7 +12,7 @@ TinyGo wraps the tiiny.host external API, providing command-line deploy, update,
 tinygo/
 ├── cli.py       # Click command group — all user-facing commands and Rich output
 ├── api.py       # TiinyClient — HTTP wrapper around tiiny.host REST API
-├── config.py    # Config file I/O (~/.tinygo/config.json), API key resolution
+├── config.py    # Config I/O (~/.tinygo/.env + config.yaml), API key resolution, legacy migration
 ├── bundle.py    # HTML scanning, file staging, path rewriting, zip creation
 ├── log.py       # Deployment event logging (~/.tinygo/deployments.log)
 └── __init__.py  # Version string
@@ -43,21 +43,21 @@ tinygo/                  # Repository root
 - **Install:** `pip install -e .` (editable mode)
 - **Run:** `tinygo <command>` after install
 - **Test:** `pytest tests/` from repo root
-- **Dependencies:** click >= 8.0, requests >= 2.28, rich >= 13.0 (no dev deps yet)
+- **Dependencies:** click >= 8.0, python-dotenv >= 1.0, pyyaml >= 6.0, requests >= 2.28, rich >= 13.0 (no dev deps yet)
 
 ## Conventions
 
 - **CLI framework:** Click with `@click.group()` pattern
 - **Output:** Rich console for all user-facing output (tables, status spinners, colored text)
 - **Error handling:** `TiinyError` exception with status_code and detail; caught in CLI, printed with `[red]`, exits with code 1
-- **Config location:** `~/.tinygo/` directory (config.json, deployments.log)
+- **Config location:** `~/.tinygo/` directory (.env for secrets, config.yaml for settings, deployments.log)
 - **Domain normalization:** `.tiiny.site` suffix auto-appended if missing
-- **Imports:** stdlib only for bundle.py and log.py; third-party (click, requests, rich) only in cli.py and api.py
+- **Imports:** stdlib only for bundle.py and log.py; third-party (click, requests, rich) in cli.py and api.py; (python-dotenv, pyyaml) in config.py
 
 ## Current Status
 
-- **Version:** 0.1.0
+- **Version:** 0.2.0
 - **Features:** deploy, update, delete, list, profile, config, bundle (--bundle flag), log
-- **Tests:** 39 passing (pytest — test_api, test_bundle, test_config, test_log)
+- **Tests:** 47 passing (pytest — test_api, test_bundle, test_config, test_log)
 - **CI/CD:** None (manual install and deploy)
 - **Deployments:** Manual via `tinygo deploy`
