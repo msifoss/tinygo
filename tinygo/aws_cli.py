@@ -1,6 +1,9 @@
 """TinyGo AWS CLI — deploy web pages to S3 + CloudFront."""
 
+import json
 import shutil
+import subprocess
+from pathlib import Path
 
 import click
 from rich.console import Console
@@ -56,46 +59,53 @@ def aws():
 # ── init ─────────────────────────────────────────────────────────────────
 
 
-@aws.command()
-@click.option("--region", default="us-east-1", help="AWS region.")
-@click.option("--stack-name", default="tinygo-hosting", help="CloudFormation stack name.")
-@click.option("--guided", is_flag=True, help="Run sam deploy --guided.")
-def init(region, stack_name, guided):
-    """Provision AWS infrastructure via SAM and save config."""
-    for tool in ("sam", "aws"):
-        if not shutil.which(tool):
-            console.print(f"[red]{tool} CLI not found.[/red] Install it first.")
-            raise SystemExit(1)
+def _write_lambda_config(infra_dir, config_data):
+    """Write config.json into the Lambda@Edge package directory."""
+    config_path = infra_dir / "lambda_edge" / "config.json"
+    config_path.write_text(json.dumps(config_data, indent=2))
 
-    import subprocess
-    import json
-    from pathlib import Path
 
-    infra_dir = Path(__file__).parent.parent / "infra"
-    if not (infra_dir / "template.yaml").exists():
-        console.print(f"[red]SAM template not found at {infra_dir}/template.yaml[/red]")
+def _get_client_secret(region, pool_id, client_id):
+    """Retrieve the Cognito app client secret via AWS CLI."""
+    result = subprocess.run(
+        ["aws", "cognito-idp", "describe-user-pool-client",
+         "--user-pool-id", pool_id, "--client-id", client_id,
+         "--region", region, "--output", "json"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    data = json.loads(result.stdout)
+    return data.get("UserPoolClient", {}).get("ClientSecret")
+
+
+def _sam_build(infra_dir):
+    """Run sam build and return True on success."""
+    result = subprocess.run(
+        ["sam", "build"],
+        cwd=str(infra_dir),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        console.print(f"[red]sam build failed:[/red]\n{result.stderr}")
         raise SystemExit(1)
 
-    # Build
-    with console.status("Running sam build..."):
-        result = subprocess.run(
-            ["sam", "build"],
-            cwd=str(infra_dir),
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            console.print(f"[red]sam build failed:[/red]\n{result.stderr}")
-            raise SystemExit(1)
-    console.print("[green]sam build succeeded.[/green]")
 
-    # Deploy
-    deploy_cmd = ["sam", "deploy", "--stack-name", stack_name, "--region", region,
-                  "--capabilities", "CAPABILITY_IAM", "--no-fail-on-empty-changeset"]
+def _sam_deploy(infra_dir, stack_name, region, domain_prefix, guided):
+    """Run sam deploy and return True on success."""
+    deploy_cmd = [
+        "sam", "deploy",
+        "--stack-name", stack_name,
+        "--region", region,
+        "--capabilities", "CAPABILITY_IAM",
+        "--no-fail-on-empty-changeset",
+        "--parameter-overrides", f"CognitoDomainPrefix={domain_prefix}",
+    ]
     if guided:
         deploy_cmd.append("--guided")
 
-    console.print("Running sam deploy...")
     result = subprocess.run(
         deploy_cmd,
         cwd=str(infra_dir),
@@ -106,31 +116,113 @@ def init(region, stack_name, guided):
         stderr = result.stderr if not guided else ""
         console.print(f"[red]sam deploy failed:[/red]\n{stderr}")
         raise SystemExit(1)
-    console.print("[green]sam deploy succeeded.[/green]")
 
-    # Read stack outputs
-    with console.status("Reading stack outputs..."):
-        result = subprocess.run(
-            ["aws", "cloudformation", "describe-stacks",
-             "--stack-name", stack_name, "--region", region,
-             "--query", "Stacks[0].Outputs", "--output", "json"],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            console.print(f"[red]Failed to read stack outputs:[/red]\n{result.stderr}")
+
+def _read_stack_outputs(stack_name, region):
+    """Read CloudFormation stack outputs, return dict of key→value."""
+    result = subprocess.run(
+        ["aws", "cloudformation", "describe-stacks",
+         "--stack-name", stack_name, "--region", region,
+         "--query", "Stacks[0].Outputs", "--output", "json"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        console.print(f"[red]Failed to read stack outputs:[/red]\n{result.stderr}")
+        raise SystemExit(1)
+    outputs = json.loads(result.stdout)
+    return {o["OutputKey"]: o["OutputValue"] for o in outputs}
+
+
+@aws.command()
+@click.option("--region", default="us-east-1", help="AWS region.")
+@click.option("--stack-name", default="tinygo-hosting", help="CloudFormation stack name.")
+@click.option("--domain-prefix", required=True, help="Globally unique Cognito Hosted UI domain prefix.")
+@click.option("--guided", is_flag=True, help="Run sam deploy --guided.")
+def init(region, stack_name, domain_prefix, guided):
+    """Provision AWS infrastructure via SAM and save config.
+
+    Uses a two-phase deploy: Phase 1 creates the stack with a placeholder
+    Lambda config, Phase 2 re-deploys with the real config (CloudFront domain,
+    client secret) once the stack outputs are known.
+    """
+    for tool in ("sam", "aws"):
+        if not shutil.which(tool):
+            console.print(f"[red]{tool} CLI not found.[/red] Install it first.")
             raise SystemExit(1)
 
-    outputs = json.loads(result.stdout)
-    output_map = {o["OutputKey"]: o["OutputValue"] for o in outputs}
+    infra_dir = Path(__file__).parent.parent / "infra"
+    if not (infra_dir / "template.yaml").exists():
+        console.print(f"[red]SAM template not found at {infra_dir}/template.yaml[/red]")
+        raise SystemExit(1)
 
+    # ── Phase 1: Deploy with placeholder config ───────────────────────
+    console.print("[bold]Phase 1:[/bold] Deploying infrastructure...")
+    placeholder_config = {
+        "region": region,
+        "user_pool_id": "placeholder",
+        "client_id": "placeholder",
+        "client_secret": "placeholder",
+        "cognito_domain": "https://placeholder.auth.us-east-1.amazoncognito.com",
+        "callback_url": "https://placeholder.cloudfront.net/_auth/callback",
+        "cloudfront_domain": "placeholder.cloudfront.net",
+    }
+    _write_lambda_config(infra_dir, placeholder_config)
+
+    with console.status("Running sam build (phase 1)..."):
+        _sam_build(infra_dir)
+    console.print("[green]sam build succeeded (phase 1).[/green]")
+
+    console.print("Running sam deploy (phase 1)...")
+    _sam_deploy(infra_dir, stack_name, region, domain_prefix, guided)
+    console.print("[green]sam deploy succeeded (phase 1).[/green]")
+
+    # ── Read stack outputs ────────────────────────────────────────────
+    with console.status("Reading stack outputs..."):
+        output_map = _read_stack_outputs(stack_name, region)
+
+    user_pool_id = output_map.get("UserPoolId", "")
+    client_id = output_map.get("UserPoolClientId", "")
+    cloudfront_domain = output_map.get("CloudFrontDomain", "")
+    cognito_domain_prefix = output_map.get("CognitoDomainPrefix", domain_prefix)
+
+    # Retrieve client secret
+    with console.status("Retrieving client secret..."):
+        client_secret = _get_client_secret(region, user_pool_id, client_id)
+    if not client_secret:
+        console.print("[red]Failed to retrieve Cognito client secret.[/red]")
+        raise SystemExit(1)
+
+    # ── Phase 2: Re-deploy with real config ───────────────────────────
+    console.print("[bold]Phase 2:[/bold] Re-deploying with real configuration...")
+    real_config = {
+        "region": region,
+        "user_pool_id": user_pool_id,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "cognito_domain": f"https://{cognito_domain_prefix}.auth.{region}.amazoncognito.com",
+        "callback_url": f"https://{cloudfront_domain}/_auth/callback",
+        "cloudfront_domain": cloudfront_domain,
+    }
+    _write_lambda_config(infra_dir, real_config)
+
+    with console.status("Running sam build (phase 2)..."):
+        _sam_build(infra_dir)
+    console.print("[green]sam build succeeded (phase 2).[/green]")
+
+    console.print("Running sam deploy (phase 2)...")
+    _sam_deploy(infra_dir, stack_name, region, domain_prefix, guided)
+    console.print("[green]sam deploy succeeded (phase 2).[/green]")
+
+    # ── Save config ───────────────────────────────────────────────────
     aws_config = {
         "region": region,
         "bucket_name": output_map.get("BucketName", ""),
         "distribution_id": output_map.get("DistributionId", ""),
-        "cloudfront_domain": output_map.get("CloudFrontDomain", ""),
-        "cognito_user_pool_id": output_map.get("UserPoolId", ""),
-        "cognito_client_id": output_map.get("UserPoolClientId", ""),
+        "cloudfront_domain": cloudfront_domain,
+        "cognito_user_pool_id": user_pool_id,
+        "cognito_client_id": client_id,
+        "cognito_domain_prefix": cognito_domain_prefix,
     }
     set_aws_config(aws_config)
     console.print("[green]AWS config saved to ~/.tinygo/config.yaml[/green]")

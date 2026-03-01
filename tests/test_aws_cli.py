@@ -1,6 +1,7 @@
 """Tests for tinygo.aws_cli module."""
 
-from unittest.mock import MagicMock, patch
+import json
+from unittest.mock import MagicMock, patch, call
 
 import pytest
 from click.testing import CliRunner
@@ -173,3 +174,162 @@ def test_delete_no_files(mock_client, runner, aws_config):
     result = runner.invoke(aws, ["delete", "--site", "empty", "--yes"])
     assert result.exit_code == 0
     assert "No files found" in result.output
+
+
+# ── init ────────────────────────────────────────────────────────────────
+
+
+def test_init_requires_domain_prefix(runner):
+    result = runner.invoke(aws, ["init"])
+    assert result.exit_code != 0
+    assert "domain-prefix" in result.output.lower() or "Missing" in result.output
+
+
+@patch("tinygo.aws_cli.shutil.which", return_value="/usr/bin/sam")
+@patch("tinygo.aws_cli._sam_build")
+@patch("tinygo.aws_cli._sam_deploy")
+@patch("tinygo.aws_cli._read_stack_outputs")
+@patch("tinygo.aws_cli._get_client_secret")
+@patch("tinygo.aws_cli._write_lambda_config")
+@patch("tinygo.aws_cli.set_aws_config")
+def test_init_two_phase_deploy(
+    mock_set_config, mock_write_config, mock_secret,
+    mock_outputs, mock_deploy, mock_build, mock_which,
+    runner, tmp_path, monkeypatch,
+):
+    """init performs two-phase deploy: placeholder then real config."""
+    import tinygo.aws_cli as aws_mod
+
+    # Fake infra dir with template
+    infra_dir = tmp_path / "infra"
+    infra_dir.mkdir()
+    (infra_dir / "template.yaml").write_text("AWSTemplateFormatVersion: 2010")
+    (infra_dir / "lambda_edge").mkdir()
+    monkeypatch.setattr(
+        aws_mod, "Path",
+        lambda x: type("P", (), {
+            "parent": type("PP", (), {"parent": tmp_path})()
+        })() if x == aws_mod.__file__ else __import__("pathlib").Path(x),
+    )
+    # Simpler: just patch the infra_dir resolution
+    monkeypatch.setattr(aws_mod.Path, "__new__", __import__("pathlib").Path.__new__)
+
+    mock_outputs.return_value = {
+        "BucketName": "tinygo-sites-123",
+        "DistributionId": "E123",
+        "CloudFrontDomain": "d111.cloudfront.net",
+        "UserPoolId": "us-east-1_ABC",
+        "UserPoolClientId": "client123",
+        "CognitoDomainPrefix": "myapp",
+    }
+    mock_secret.return_value = "super-secret-value"
+
+    result = runner.invoke(aws, [
+        "init", "--domain-prefix", "myapp", "--region", "us-east-1",
+    ])
+
+    # Build called twice (phase 1 + phase 2)
+    assert mock_build.call_count == 2
+    # Deploy called twice
+    assert mock_deploy.call_count == 2
+    # Config written twice (placeholder + real)
+    assert mock_write_config.call_count == 2
+    # Client secret retrieved
+    mock_secret.assert_called_once_with("us-east-1", "us-east-1_ABC", "client123")
+
+
+@patch("tinygo.aws_cli.shutil.which", return_value="/usr/bin/sam")
+@patch("tinygo.aws_cli._sam_build")
+@patch("tinygo.aws_cli._sam_deploy")
+@patch("tinygo.aws_cli._read_stack_outputs")
+@patch("tinygo.aws_cli._get_client_secret")
+@patch("tinygo.aws_cli._write_lambda_config")
+@patch("tinygo.aws_cli.set_aws_config")
+def test_init_saves_cognito_domain_prefix(
+    mock_set_config, mock_write_config, mock_secret,
+    mock_outputs, mock_deploy, mock_build, mock_which,
+    runner, tmp_path, monkeypatch,
+):
+    """init saves cognito_domain_prefix to config."""
+    mock_outputs.return_value = {
+        "BucketName": "tinygo-sites-123",
+        "DistributionId": "E123",
+        "CloudFrontDomain": "d111.cloudfront.net",
+        "UserPoolId": "us-east-1_ABC",
+        "UserPoolClientId": "client123",
+        "CognitoDomainPrefix": "myprefix",
+    }
+    mock_secret.return_value = "secret"
+
+    result = runner.invoke(aws, [
+        "init", "--domain-prefix", "myprefix", "--region", "us-east-1",
+    ])
+
+    # Check that set_aws_config was called with cognito_domain_prefix
+    config_saved = mock_set_config.call_args[0][0]
+    assert config_saved["cognito_domain_prefix"] == "myprefix"
+
+
+@patch("tinygo.aws_cli.shutil.which", return_value="/usr/bin/sam")
+@patch("tinygo.aws_cli._sam_build")
+@patch("tinygo.aws_cli._sam_deploy")
+@patch("tinygo.aws_cli._read_stack_outputs")
+@patch("tinygo.aws_cli._get_client_secret", return_value=None)
+@patch("tinygo.aws_cli._write_lambda_config")
+def test_init_fails_when_secret_unavailable(
+    mock_write_config, mock_secret,
+    mock_outputs, mock_deploy, mock_build, mock_which,
+    runner,
+):
+    """init exits with error when client secret cannot be retrieved."""
+    mock_outputs.return_value = {
+        "BucketName": "b",
+        "DistributionId": "E1",
+        "CloudFrontDomain": "d.cloudfront.net",
+        "UserPoolId": "us-east-1_X",
+        "UserPoolClientId": "c1",
+        "CognitoDomainPrefix": "p",
+    }
+
+    result = runner.invoke(aws, [
+        "init", "--domain-prefix", "myprefix",
+    ])
+    assert result.exit_code == 1
+    assert "client secret" in result.output.lower()
+
+
+@patch("tinygo.aws_cli.shutil.which", return_value="/usr/bin/sam")
+@patch("tinygo.aws_cli._sam_build")
+@patch("tinygo.aws_cli._sam_deploy")
+@patch("tinygo.aws_cli._read_stack_outputs")
+@patch("tinygo.aws_cli._get_client_secret")
+@patch("tinygo.aws_cli._write_lambda_config")
+@patch("tinygo.aws_cli.set_aws_config")
+def test_init_writes_real_config_in_phase2(
+    mock_set_config, mock_write_config, mock_secret,
+    mock_outputs, mock_deploy, mock_build, mock_which,
+    runner,
+):
+    """Phase 2 config.json has real CloudFront domain and client secret."""
+    mock_outputs.return_value = {
+        "BucketName": "bucket",
+        "DistributionId": "E999",
+        "CloudFrontDomain": "abc123.cloudfront.net",
+        "UserPoolId": "us-east-1_Pool",
+        "UserPoolClientId": "clientXYZ",
+        "CognitoDomainPrefix": "myapp",
+    }
+    mock_secret.return_value = "the-real-secret"
+
+    result = runner.invoke(aws, [
+        "init", "--domain-prefix", "myapp", "--region", "us-east-1",
+    ])
+
+    # Second call to _write_lambda_config is the real config
+    real_config_call = mock_write_config.call_args_list[1]
+    config_data = real_config_call[0][1]
+    assert config_data["client_secret"] == "the-real-secret"
+    assert config_data["cloudfront_domain"] == "abc123.cloudfront.net"
+    assert config_data["callback_url"] == "https://abc123.cloudfront.net/_auth/callback"
+    assert config_data["cognito_domain"] == "https://myapp.auth.us-east-1.amazoncognito.com"
+    assert config_data["user_pool_id"] == "us-east-1_Pool"

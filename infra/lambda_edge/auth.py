@@ -1,12 +1,20 @@
-"""Lambda@Edge viewer-request handler — validates Cognito JWT tokens."""
+"""Lambda@Edge viewer-request handler — validates Cognito JWT tokens.
+
+Supports two auth flows:
+1. Bearer token (CLI/API clients) — Authorization: Bearer <token>
+2. Cookie-based (browser) — tinygo_id_token cookie set after Cognito Hosted UI login
+
+Unauthenticated browser requests are redirected to the Cognito Hosted UI.
+The /_auth/callback path handles the OAuth2 authorization code exchange.
+"""
 
 import base64
 import hashlib
-import hmac
 import json
 import re
 import struct
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -41,6 +49,11 @@ def _base64url_decode(s):
     if padding != 4:
         s += "=" * padding
     return base64.b64decode(s)
+
+
+def _base64url_encode(data):
+    """Encode bytes to a base64url string (no padding)."""
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
 
 def _decode_jwt_unverified(token):
@@ -143,32 +156,209 @@ def _unauthorized(message="Unauthorized"):
     }
 
 
-def handler(event, context):
-    """Validate JWT from Authorization header on viewer-request."""
-    request = event["Records"][0]["cf"]["request"]
+def _redirect(location, cookies=None):
+    """Return a 302 redirect response, optionally setting cookies."""
+    headers = {
+        "location": [{"key": "Location", "value": location}],
+        "cache-control": [{"key": "Cache-Control", "value": "no-cache, no-store"}],
+    }
+    if cookies:
+        headers["set-cookie"] = [
+            {"key": "Set-Cookie", "value": c} for c in cookies
+        ]
+    return {
+        "status": "302",
+        "statusDescription": "Found",
+        "headers": headers,
+        "body": "",
+    }
 
-    # Extract token from Authorization header
-    headers = request.get("headers", {})
-    auth_header = headers.get("authorization", [])
-    if not auth_header:
-        return _unauthorized("Missing Authorization header")
 
-    auth_value = auth_header[0].get("value", "")
-    match = re.match(r"^Bearer\s+(.+)$", auth_value, re.IGNORECASE)
-    if not match:
-        return _unauthorized("Invalid Authorization header format")
+def _parse_cookies(headers):
+    """Extract cookies from CloudFront request headers into a dict."""
+    cookies = {}
+    for cookie_header in headers.get("cookie", []):
+        for part in cookie_header.get("value", "").split(";"):
+            part = part.strip()
+            if "=" in part:
+                name, _, value = part.partition("=")
+                cookies[name.strip()] = value.strip()
+    return cookies
 
-    token = match.group(1)
 
-    # Decode and validate
+def _validate_jwt(token, config):
+    """Validate a JWT token against config. Returns (header, payload) or None."""
     header, payload = _decode_jwt_unverified(token)
     if header is None or payload is None:
-        return _unauthorized("Invalid token format")
+        return None
+
+    if not _validate_jwt_claims(payload, config):
+        return None
+
+    region = config.get("region", "us-east-1")
+    user_pool_id = config.get("user_pool_id")
+
+    # Verify kid is in JWKS and signature is valid
+    try:
+        jwks = _get_jwks(region, user_pool_id)
+    except Exception:
+        return None
+
+    kid = header.get("kid")
+    jwks_kids = [k.get("kid") for k in jwks.get("keys", [])]
+    if kid not in jwks_kids:
+        return None
+
+    if not _verify_rs256(token, jwks):
+        return None
+
+    return header, payload
+
+
+def _validate_jwt_claims(payload, config):
+    """Validate JWT claims (expiry, issuer, client_id). Returns True if valid."""
+    region = config.get("region", "us-east-1")
+    user_pool_id = config.get("user_pool_id")
+    client_id = config.get("client_id")
+
+    if not user_pool_id or not client_id:
+        return False
+
+    # Check expiry
+    exp = payload.get("exp")
+    if exp is None or time.time() > exp:
+        return False
+
+    # Check issuer
+    expected_issuer = f"https://cognito-idp.{region}.amazonaws.com/{user_pool_id}"
+    if payload.get("iss") != expected_issuer:
+        return False
+
+    # Check client_id (in 'aud' or 'client_id' claim depending on token type)
+    token_client = payload.get("aud") or payload.get("client_id")
+    if token_client != client_id:
+        return False
+
+    return True
+
+
+def _build_login_url(config, request_uri):
+    """Build the Cognito Hosted UI login URL with state parameter."""
+    cognito_domain = config["cognito_domain"]
+    client_id = config["client_id"]
+    callback_url = config["callback_url"]
+
+    # Encode the original URI in state so we can redirect back after login
+    state = _base64url_encode(request_uri.encode("utf-8"))
+
+    params = urllib.parse.urlencode({
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": callback_url,
+        "scope": "openid email profile",
+        "state": state,
+    })
+    return f"{cognito_domain}/login?{params}"
+
+
+def _exchange_code_for_tokens(code, config):
+    """Exchange an authorization code for tokens via Cognito /oauth2/token.
+
+    Returns the parsed JSON response or None on failure.
+    """
+    cognito_domain = config["cognito_domain"]
+    client_id = config["client_id"]
+    client_secret = config["client_secret"]
+    callback_url = config["callback_url"]
+
+    token_url = f"{cognito_domain}/oauth2/token"
+    body = urllib.parse.urlencode({
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": callback_url,
+        "client_id": client_id,
+    })
+
+    # Basic auth header: base64(client_id:client_secret)
+    credentials = base64.b64encode(
+        f"{client_id}:{client_secret}".encode("utf-8")
+    ).decode("ascii")
+
+    req = urllib.request.Request(
+        token_url,
+        data=body.encode("utf-8"),
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Authorization": f"Basic {credentials}",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return json.loads(resp.read())
+    except Exception:
+        return None
+
+
+def _handle_callback(request, config):
+    """Handle /_auth/callback — exchange code for tokens, set cookies, redirect."""
+    query_string = request.get("querystring", "")
+    params = urllib.parse.parse_qs(query_string)
+
+    code = params.get("code", [None])[0]
+    state = params.get("state", [None])[0]
+
+    if not code:
+        return _unauthorized("Missing authorization code")
+
+    tokens = _exchange_code_for_tokens(code, config)
+    if not tokens:
+        return _unauthorized("Token exchange failed")
+
+    # Recover original URI from state
+    redirect_uri = "/"
+    if state:
+        try:
+            redirect_uri = _base64url_decode(state).decode("utf-8")
+        except Exception:
+            redirect_uri = "/"
+
+    # Build Set-Cookie headers
+    expires_in = tokens.get("expires_in", 3600)
+    cookie_attrs = f"Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age={expires_in}"
+    cookies = []
+
+    if tokens.get("id_token"):
+        cookies.append(f"tinygo_id_token={tokens['id_token']}; {cookie_attrs}")
+    if tokens.get("access_token"):
+        cookies.append(f"tinygo_access_token={tokens['access_token']}; {cookie_attrs}")
+    if tokens.get("refresh_token"):
+        # Refresh tokens last longer
+        refresh_attrs = f"Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=2592000"
+        cookies.append(f"tinygo_refresh_token={tokens['refresh_token']}; {refresh_attrs}")
+
+    cloudfront_domain = config.get("cloudfront_domain", "")
+    redirect_location = f"https://{cloudfront_domain}{redirect_uri}"
+
+    return _redirect(redirect_location, cookies=cookies)
+
+
+def handler(event, context):
+    """Validate JWT from Authorization header or cookie on viewer-request.
+
+    Three cases:
+    1. /_auth/callback — exchange authorization code for tokens
+    2. Valid Bearer header OR valid cookie — forward request to origin
+    3. No auth — redirect to Cognito Hosted UI login
+    """
+    request = event["Records"][0]["cf"]["request"]
+    uri = request.get("uri", "/")
+    headers = request.get("headers", {})
 
     try:
         config = _load_config()
     except FileNotFoundError:
-        # Config not baked in — fail open in dev, fail closed in prod
         return _unauthorized("Auth configuration missing")
 
     region = config.get("region", "us-east-1")
@@ -178,35 +368,34 @@ def handler(event, context):
     if not user_pool_id or not client_id:
         return _unauthorized("Auth configuration incomplete")
 
-    # Check expiry
-    exp = payload.get("exp")
-    if exp is None or time.time() > exp:
-        return _unauthorized("Token expired")
+    # Case 1: /_auth/callback — handle OAuth2 callback
+    if uri == "/_auth/callback":
+        return _handle_callback(request, config)
 
-    # Check issuer
-    expected_issuer = f"https://cognito-idp.{region}.amazonaws.com/{user_pool_id}"
-    if payload.get("iss") != expected_issuer:
-        return _unauthorized("Invalid token issuer")
+    # Case 2a: Bearer token (CLI/API clients)
+    auth_header = headers.get("authorization", [])
+    if auth_header:
+        auth_value = auth_header[0].get("value", "")
+        match = re.match(r"^Bearer\s+(.+)$", auth_value, re.IGNORECASE)
+        if match:
+            token = match.group(1)
+            result = _validate_jwt(token, config)
+            if result is not None:
+                return request
+            return _unauthorized("Invalid token")
 
-    # Check client_id (in 'aud' or 'client_id' claim depending on token type)
-    token_client = payload.get("aud") or payload.get("client_id")
-    if token_client != client_id:
-        return _unauthorized("Invalid client")
+    # Case 2b: Cookie-based auth (browser)
+    cookies = _parse_cookies(headers)
+    id_token = cookies.get("tinygo_id_token")
+    if id_token:
+        result = _validate_jwt(id_token, config)
+        if result is not None:
+            return request
+        # Cookie token is invalid/expired — fall through to redirect
 
-    # Verify kid is in JWKS
-    try:
-        jwks = _get_jwks(region, user_pool_id)
-    except Exception:
-        return _unauthorized("Could not fetch signing keys")
+    # Case 3: No valid auth — redirect to Cognito Hosted UI
+    if "cognito_domain" not in config or "callback_url" not in config:
+        return _unauthorized("Login not configured")
 
-    kid = header.get("kid")
-    jwks_kids = [k.get("kid") for k in jwks.get("keys", [])]
-    if kid not in jwks_kids:
-        return _unauthorized("Unknown signing key")
-
-    # Verify signature
-    if not _verify_rs256(token, jwks):
-        return _unauthorized("Invalid token signature")
-
-    # Token is valid — forward the request
-    return request
+    login_url = _build_login_url(config, uri)
+    return _redirect(login_url)

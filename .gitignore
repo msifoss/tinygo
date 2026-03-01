@@ -11,3 +11,4 @@ venv/
 tmp/
 .aws-sam/
 infra/.aws-sam/
+infra/lambda_edge/config.json

@@ -11,6 +11,9 @@ Parameters:
   MinPasswordLength:
     Type: Number
     Default: 12
+  CognitoDomainPrefix:
+    Type: String
+    Description: Globally unique prefix for the Cognito Hosted UI domain
 
 Globals:
   Function:
@@ -108,8 +111,15 @@ Resources:
           Required: true
           Mutable: true
 
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Ref CognitoDomainPrefix
+      UserPoolId: !Ref UserPool
+
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
+    DependsOn: UserPoolDomain
     Properties:
       ClientName: tinygo-client
       UserPoolId: !Ref UserPool
@@ -117,7 +127,20 @@ Resources:
         - ALLOW_USER_PASSWORD_AUTH
         - ALLOW_USER_SRP_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
-      GenerateSecret: false
+      GenerateSecret: true
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - profile
+      SupportedIdentityProviders:
+        - COGNITO
+      CallbackURLs:
+        - !Sub "https://${Distribution.DomainName}/_auth/callback"
+      LogoutURLs:
+        - !Sub "https://${Distribution.DomainName}/"
 
   # ── Lambda@Edge ──────────────────────────────────────────────────────
   AuthFunctionRole:
@@ -170,3 +193,7 @@ Outputs:
   UserPoolClientId:
     Description: Cognito App Client ID
     Value: !Ref UserPoolClient
+
+  CognitoDomainPrefix:
+    Description: Cognito Hosted UI domain prefix
+    Value: !Ref CognitoDomainPrefix
