@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-01
+
+### Changed
+- Bundling is now on by default for `deploy` and `update` — linked local files are automatically packaged into a zip
+- Replaced `--bundle` / `-b` opt-in flag with `--no-bundle` opt-out flag
+
 ## [0.3.1] - 2026-03-01
 
 ### Fixed
