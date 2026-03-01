@@ -37,9 +37,9 @@ def main():
 @click.argument("file", type=click.Path(exists=True))
 @click.option("--domain", "-d", default=None, help="Subdomain for the site.")
 @click.option("--password", "-p", default=None, help="Password-protect the site.")
-@click.option("--bundle", "-b", is_flag=True, help="Bundle linked local files into a zip.")
+@click.option("--no-bundle", is_flag=True, help="Skip bundling linked local files.")
 @click.option("--api-key", default=None, envvar="TIINY_API_KEY", help="API key override.")
-def deploy(file, domain, password, bundle, api_key):
+def deploy(file, domain, password, no_bundle, api_key):
     """Deploy a file or zip to a new tiiny.host site."""
     if not domain:
         domain = click.prompt("Choose a subdomain")
@@ -48,7 +48,7 @@ def deploy(file, domain, password, bundle, api_key):
     deploy_file = file
     zip_path = None
     try:
-        if bundle:
+        if not no_bundle:
             with console.status("Bundling..."):
                 zip_path = create_bundle(file)
             deploy_file = str(zip_path)
@@ -78,16 +78,16 @@ def deploy(file, domain, password, bundle, api_key):
 @click.argument("file", type=click.Path(exists=True))
 @click.option("--domain", "-d", required=True, help="Subdomain to update.")
 @click.option("--password", "-p", default=None, help="Password-protect the site.")
-@click.option("--bundle", "-b", is_flag=True, help="Bundle linked local files into a zip.")
+@click.option("--no-bundle", is_flag=True, help="Skip bundling linked local files.")
 @click.option("--api-key", default=None, envvar="TIINY_API_KEY", help="API key override.")
-def update(file, domain, password, bundle, api_key):
+def update(file, domain, password, no_bundle, api_key):
     """Update an existing tiiny.host site with new content."""
     client = _get_client(api_key)
 
     update_file = file
     zip_path = None
     try:
-        if bundle:
+        if not no_bundle:
             with console.status("Bundling..."):
                 zip_path = create_bundle(file)
             update_file = str(zip_path)
