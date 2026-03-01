@@ -57,7 +57,7 @@ tinygo/                  # Repository root
 ## Current Status
 
 - **Version:** 0.2.0
-- **Features:** deploy, update, delete, list, profile, config, bundle (--bundle flag), log
-- **Tests:** 47 passing (pytest — test_api, test_bundle, test_config, test_log)
+- **Features:** deploy, update, delete, list, profile, config, bundle (--bundle flag), log, auto noindex + password protection on all deployments
+- **Tests:** 50 passing (pytest — test_api, test_bundle, test_config, test_log)
 - **CI/CD:** None (manual install and deploy)
 - **Deployments:** Manual via `tinygo deploy`

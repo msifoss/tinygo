@@ -55,7 +55,7 @@ def deploy(file, domain, password, bundle, api_key):
 
         with console.status("Deploying..."):
             try:
-                result = client.create(deploy_file, domain=domain, password=password)
+                result, password_used = client.create(deploy_file, domain=domain, password=password)
             except TiinyError as e:
                 log_event("DEPLOY", domain, success=False, file_path=file, error=e.detail)
                 console.print(f"[red]Deploy failed:[/red] {e.detail}")
@@ -65,6 +65,7 @@ def deploy(file, domain, password, bundle, api_key):
         url = f"https://{link}"
         log_event("DEPLOY", domain, success=True, file_path=file, url=url)
         console.print(f"[green]Deployed![/green] {url}")
+        console.print(f"[bold]Password:[/bold] {password_used}")
     finally:
         if zip_path:
             cleanup_bundle(zip_path)
@@ -93,7 +94,7 @@ def update(file, domain, password, bundle, api_key):
 
         with console.status("Updating..."):
             try:
-                result = client.update(update_file, domain, password=password)
+                result, password_used = client.update(update_file, domain, password=password)
             except TiinyError as e:
                 log_event("UPDATE", domain, success=False, file_path=file, error=e.detail)
                 console.print(f"[red]Update failed:[/red] {e.detail}")
@@ -103,6 +104,7 @@ def update(file, domain, password, bundle, api_key):
         url = f"https://{link}"
         log_event("UPDATE", domain, success=True, file_path=file, url=url)
         console.print(f"[green]Updated![/green] {url}")
+        console.print(f"[bold]Password:[/bold] {password_used}")
     finally:
         if zip_path:
             cleanup_bundle(zip_path)

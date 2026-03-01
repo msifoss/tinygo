@@ -1,6 +1,8 @@
 """API client for the tiiny.host external API."""
 
 import json
+import secrets
+import string
 from pathlib import Path
 
 import requests
@@ -14,6 +16,14 @@ def _normalize_domain(domain: str) -> str:
     if not domain.endswith(DEFAULT_SUFFIX):
         return domain + DEFAULT_SUFFIX
     return domain
+
+
+_PASSWORD_ALPHABET = string.ascii_letters + string.digits + string.punctuation
+
+
+def generate_password(length: int = 15) -> str:
+    """Generate a cryptographically strong random password."""
+    return "".join(secrets.choice(_PASSWORD_ALPHABET) for _ in range(length))
 
 
 class TiinyError(Exception):
@@ -46,48 +56,57 @@ class TiinyClient:
         file_path: str,
         domain: str | None = None,
         password: str | None = None,
-    ) -> dict:
-        """Create a new site via POST /v1/upload."""
+    ) -> tuple[dict, str]:
+        """Create a new site via POST /v1/upload.
+
+        Returns a tuple of (response_dict, password_used).
+        """
         path = Path(file_path)
-        site_settings: dict = {}
-        if password:
-            site_settings["passwordProtected"] = True
-            site_settings["password"] = password
+        password_used = password or generate_password()
+        site_settings: dict = {
+            "passwordProtected": True,
+            "password": password_used,
+            "noIndex": True,
+        }
 
         with open(path, "rb") as f:
             files = {"files": (path.name, f)}
-            data: dict = {}
+            data: dict = {"siteSettings": json.dumps(site_settings)}
             if domain:
                 data["domain"] = _normalize_domain(domain)
-            if site_settings:
-                data["siteSettings"] = json.dumps(site_settings)
             resp = self.session.post(f"{BASE_URL}/v1/upload", files=files, data=data)
 
         self._raise_for_error(resp)
-        return resp.json()
+        return resp.json(), password_used
 
     def update(
         self,
         file_path: str,
         domain: str,
         password: str | None = None,
-    ) -> dict:
-        """Update an existing site via PUT /v1/upload."""
+    ) -> tuple[dict, str]:
+        """Update an existing site via PUT /v1/upload.
+
+        Returns a tuple of (response_dict, password_used).
+        """
         path = Path(file_path)
-        site_settings: dict = {}
-        if password:
-            site_settings["passwordProtected"] = True
-            site_settings["password"] = password
+        password_used = password or generate_password()
+        site_settings: dict = {
+            "passwordProtected": True,
+            "password": password_used,
+            "noIndex": True,
+        }
 
         with open(path, "rb") as f:
             files = {"files": (path.name, f)}
-            data: dict = {"domain": _normalize_domain(domain)}
-            if site_settings:
-                data["siteSettings"] = json.dumps(site_settings)
+            data: dict = {
+                "domain": _normalize_domain(domain),
+                "siteSettings": json.dumps(site_settings),
+            }
             resp = self.session.put(f"{BASE_URL}/v1/upload", files=files, data=data)
 
         self._raise_for_error(resp)
-        return resp.json()
+        return resp.json(), password_used
 
     def delete(self, domain: str) -> dict:
         """Delete a site via DELETE /v1/delete."""

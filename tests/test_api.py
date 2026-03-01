@@ -1,6 +1,8 @@
 """Tests for tinygo.api module."""
 
-from tinygo.api import _normalize_domain
+import string
+
+from tinygo.api import _normalize_domain, generate_password
 
 
 def test_normalize_domain_adds_suffix():
@@ -17,3 +19,21 @@ def test_normalize_domain_empty():
 
 def test_normalize_domain_with_dots():
     assert _normalize_domain("my.custom.site") == "my.custom.site.tiiny.site"
+
+
+# ── generate_password ────────────────────────────────────────────────────
+
+
+def test_generate_password_length():
+    pw = generate_password()
+    assert len(pw) == 15
+
+
+def test_generate_password_character_set():
+    allowed = set(string.ascii_letters + string.digits + string.punctuation)
+    pw = generate_password()
+    assert all(c in allowed for c in pw)
+
+
+def test_generate_password_uniqueness():
+    assert generate_password() != generate_password()
