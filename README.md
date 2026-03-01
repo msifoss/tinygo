@@ -9,11 +9,12 @@ TinyGo is a command-line tool that wraps the tiiny.host API, giving you fast, sc
 ## Features
 
 - **One-command deploys** — push an HTML file or zip to a live URL in seconds
-- **Bundle mode** — `--bundle` scans your HTML for linked local files, rewrites paths, and deploys everything as a zip
+- **Auto-bundling** — deploys automatically scan HTML for linked local files, rewrite paths, and package everything as a zip (use `--no-bundle` to skip)
+- **Secure by default** — every deployment is password-protected (auto-generated 15-char password) and blocked from search engine indexing (`noIndex`)
 - **Deployment log** — every deploy, update, and delete is recorded; view history with `tinygo log`
 - **Full lifecycle management** — deploy, update, and delete sites without leaving the terminal
 - **Interactive prompts** — missing a domain name? TinyGo asks. Deleting a site? TinyGo confirms
-- **Password protection** — lock down any site with `--password`
+- **Custom passwords** — override the auto-generated password with `--password`
 - **Rich terminal output** — colored status messages, spinner during uploads, tabular site listings
 - **Flexible auth** — provide your API key via config file, environment variable, or CLI flag
 - **Auto domain normalization** — type `my-site` and TinyGo handles the `.tiiny.site` suffix for you
@@ -107,23 +108,25 @@ tinygo deploy index.html
 # Deploy a zip archive
 tinygo deploy site.zip --domain my-app
 
-# Deploy with password protection
+# Deploy with a custom password (overrides auto-generated)
 tinygo deploy index.html --domain secret-page --password s3cret
+
+# Deploy a single file without bundling
+tinygo deploy index.html --domain simple-page --no-bundle
 ```
 
 Output:
 
 ```
 Deployed! https://my-portfolio.tiiny.site
+Password: NF$I47kudS%P4#U
 ```
 
-### Bundle deploy
+Every deployment automatically generates a 15-character password and enables `noIndex` to block search engines. The password is displayed in the console but never written to the deployment log.
 
-When your HTML references local files (stylesheets, scripts, images, other HTML pages — even from different directories), `--bundle` scans for them, copies everything into a zip with rewritten paths, and deploys it:
+### Auto-bundling
 
-```bash
-tinygo deploy index.html --domain summit-deck --bundle
-```
+By default, when your HTML references local files (stylesheets, scripts, images, other HTML pages — even from different directories), TinyGo scans for them, copies everything into a zip with rewritten paths, and deploys it.
 
 What happens under the hood:
 1. Parses `index.html` for `href`, `src`, and CSS `url()` references
@@ -134,10 +137,7 @@ What happens under the hood:
 
 Relative paths preserve their directory structure. Absolute paths are flattened into the staging root with automatic collision avoidance. Remote URLs (`http://`, `https://`), data URIs, and anchors are left untouched. Missing files are silently skipped.
 
-```bash
-# Also works with update
-tinygo update index.html --domain summit-deck --bundle
-```
+Use `--no-bundle` to skip bundling and deploy a single file as-is.
 
 ### Update an existing site
 
@@ -149,6 +149,7 @@ Output:
 
 ```
 Updated! https://my-portfolio.tiiny.site
+Password: h#Mnd9SInkaR!M%
 ```
 
 ### Delete a site
@@ -231,8 +232,8 @@ Output:
 
 | Command | Description | Key Options |
 |---------|-------------|-------------|
-| `tinygo deploy <file>` | Deploy a new site | `--domain`, `--password`, `--bundle`, `--api-key` |
-| `tinygo update <file>` | Update an existing site | `--domain` (required), `--password`, `--bundle`, `--api-key` |
+| `tinygo deploy <file>` | Deploy a new site | `--domain`, `--password`, `--no-bundle`, `--api-key` |
+| `tinygo update <file>` | Update an existing site | `--domain` (required), `--password`, `--no-bundle`, `--api-key` |
 | `tinygo delete` | Delete a site | `--domain` (required), `--yes`, `--api-key` |
 | `tinygo list` | List all sites with quota | `--api-key` |
 | `tinygo profile` | Show account info | `--api-key` |
