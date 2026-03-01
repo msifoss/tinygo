@@ -4,7 +4,13 @@ import zipfile
 
 import pytest
 
-from tinygo.bundle import cleanup_bundle, create_bundle, scan_html
+from tinygo.bundle import (
+    cleanup_bundle,
+    cleanup_bundle_dir,
+    create_bundle,
+    create_bundle_dir,
+    scan_html,
+)
 
 
 @pytest.fixture()
@@ -153,3 +159,34 @@ def test_cleanup_bundle_removes_zip(tmp_path):
 def test_cleanup_bundle_handles_missing_file(tmp_path):
     """cleanup_bundle should not raise if the file doesn't exist."""
     cleanup_bundle(tmp_path / "nonexistent.zip")
+
+
+# ── create_bundle_dir / cleanup_bundle_dir ───────────────────────────────
+
+
+def test_create_bundle_dir_returns_directory(project_dir):
+    staging = create_bundle_dir(project_dir / "index.html")
+    try:
+        assert staging.is_dir()
+        assert (staging / "index.html").exists()
+        assert (staging / "css" / "style.css").exists()
+        assert (staging / "script.js").exists()
+    finally:
+        cleanup_bundle_dir(staging)
+
+
+def test_create_bundle_dir_rewrites_paths(project_dir):
+    staging = create_bundle_dir(project_dir / "index.html")
+    try:
+        html = (staging / "index.html").read_text()
+        assert "css/style.css" in html
+        assert "script.js" in html
+    finally:
+        cleanup_bundle_dir(staging)
+
+
+def test_cleanup_bundle_dir_removes_directory(project_dir):
+    staging = create_bundle_dir(project_dir / "index.html")
+    assert staging.exists()
+    cleanup_bundle_dir(staging)
+    assert not staging.exists()

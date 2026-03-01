@@ -5,7 +5,15 @@ import os
 
 import pytest
 
-from tinygo.config import get_api_key, get_config, mask_key, set_api_key
+from tinygo.config import (
+    get_api_key,
+    get_aws_config,
+    get_config,
+    is_aws_configured,
+    mask_key,
+    set_api_key,
+    set_aws_config,
+)
 
 
 @pytest.fixture()
@@ -178,3 +186,40 @@ def test_migration_json_without_api_key(config_dir):
 
     assert not legacy.exists()
     assert (config_dir / "config.json.bak").exists()
+
+
+# ── AWS config ───────────────────────────────────────────────────────────
+
+
+def test_get_aws_config_returns_none_when_not_set(config_dir):
+    assert get_aws_config() is None
+
+
+def test_set_and_get_aws_config(config_dir):
+    aws = {"region": "us-east-1", "bucket_name": "my-bucket", "distribution_id": "E123"}
+    set_aws_config(aws)
+    result = get_aws_config()
+    assert result == aws
+
+
+def test_set_aws_config_preserves_existing_yaml(config_dir):
+    import yaml
+
+    yaml_file = config_dir / "config.yaml"
+    yaml_file.write_text(yaml.dump({"default_domain": "my-site"}))
+
+    set_aws_config({"region": "us-east-1", "bucket_name": "b", "distribution_id": "d"})
+
+    cfg = yaml.safe_load(yaml_file.read_text())
+    assert cfg["default_domain"] == "my-site"
+    assert cfg["aws"]["region"] == "us-east-1"
+
+
+def test_is_aws_configured_true(config_dir):
+    set_aws_config({"region": "us-east-1", "bucket_name": "b", "distribution_id": "d"})
+    assert is_aws_configured() is True
+
+
+def test_is_aws_configured_false_when_missing_fields(config_dir):
+    set_aws_config({"region": "us-east-1"})
+    assert is_aws_configured() is False

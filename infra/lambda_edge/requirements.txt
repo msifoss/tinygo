@@ -1,0 +1,2 @@
+# Lambda@Edge auth function — stdlib only, no external dependencies.
+# This file exists for SAM build compatibility.

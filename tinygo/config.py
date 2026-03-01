@@ -113,3 +113,31 @@ def mask_key(key: str) -> str:
     if len(key) <= 8:
         return "****"
     return f"{key[:4]}...{key[-4:]}"
+
+
+# ── AWS configuration ────────────────────────────────────────────────────
+
+
+def get_aws_config() -> dict | None:
+    """Return the ``aws:`` section from config.yaml, or *None* if not set."""
+    config = _load_yaml_config()
+    aws = config.get("aws")
+    if not aws or not isinstance(aws, dict):
+        return None
+    return aws
+
+
+def set_aws_config(aws_config: dict) -> None:
+    """Write *aws_config* under the ``aws:`` key in config.yaml."""
+    config = _load_yaml_config()
+    config["aws"] = aws_config
+    _save_yaml_config(config)
+
+
+def is_aws_configured() -> bool:
+    """Return *True* if required AWS fields are present in config.yaml."""
+    aws = get_aws_config()
+    if aws is None:
+        return False
+    required = {"region", "bucket_name", "distribution_id"}
+    return required.issubset(aws.keys())

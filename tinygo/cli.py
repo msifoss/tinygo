@@ -7,6 +7,7 @@ from rich.table import Table
 from tinygo.api import TiinyClient, TiinyError
 from tinygo.bundle import cleanup_bundle, create_bundle
 from tinygo.config import get_api_key, get_config, mask_key, set_api_key
+from tinygo.aws_cli import aws
 from tinygo.log import clear_log, log_event, read_log
 
 console = Console()
@@ -28,6 +29,9 @@ def _get_client(api_key: str | None) -> TiinyClient:
 @click.version_option(package_name="tinygo")
 def main():
     """TinyGo — deploy web pages to tiiny.host."""
+
+
+main.add_command(aws)
 
 
 # ── deploy ───────────────────────────────────────────────────────────────

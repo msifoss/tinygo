@@ -9,3 +9,5 @@ build/
 venv/
 .env
 tmp/
+.aws-sam/
+infra/.aws-sam/

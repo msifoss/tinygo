@@ -177,11 +177,24 @@ def _build_staging_dir(entry_html: Path, all_refs: dict[Path, list[tuple[str, Pa
     return staging
 
 
-def create_bundle(html_path: str | Path) -> Path:
-    """Scan an HTML file, bundle dependencies, and return the path to a temp zip."""
+def create_bundle_dir(html_path: str | Path) -> Path:
+    """Scan an HTML file, bundle dependencies, and return the staging directory.
+
+    The caller is responsible for cleaning up via :func:`cleanup_bundle_dir`.
+    """
     html_path = Path(html_path).resolve()
     all_refs = _collect_all_refs(html_path)
-    staging = _build_staging_dir(html_path, all_refs)
+    return _build_staging_dir(html_path, all_refs)
+
+
+def cleanup_bundle_dir(staging_dir: Path) -> None:
+    """Remove a staging directory created by :func:`create_bundle_dir`."""
+    shutil.rmtree(staging_dir, ignore_errors=True)
+
+
+def create_bundle(html_path: str | Path) -> Path:
+    """Scan an HTML file, bundle dependencies, and return the path to a temp zip."""
+    staging = create_bundle_dir(html_path)
 
     zip_path = Path(tempfile.mktemp(prefix="tinygo_bundle_", suffix=".zip"))
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -191,8 +204,7 @@ def create_bundle(html_path: str | Path) -> Path:
                 arcname = full.relative_to(staging)
                 zf.write(full, arcname)
 
-    # Clean up the staging directory.
-    shutil.rmtree(staging, ignore_errors=True)
+    cleanup_bundle_dir(staging)
     return zip_path
 
 
