@@ -8,7 +8,7 @@
 |----|------|------|--------|
 | B-001 | Publish to PyPI | M | Executable |
 | B-002 | Add CI pipeline (GitHub Actions) | M | Executable |
-| B-003 | Enforce config file permissions (REQ-SEC-002) | S | Executable |
+| B-003 | Enforce .env file permissions (REQ-SEC-002) | S | Executable |
 
 ## Should
 

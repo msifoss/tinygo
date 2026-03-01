@@ -2,15 +2,10 @@
 
 ## Status: Holding Pattern
 
-No active bolt. Last completed work: Bundle deploy + deployment logging feature (2026-03-01).
-
-## Recent completions
-- Bundle deploy feature (`--bundle` flag on deploy/update)
-- Deployment logging (`tinygo log` command)
-- DLC framework bootstrap (all foundational docs)
-- Test suite creation
+No active bolt. Last completed: Bolt 3 — Config migration to .env + YAML (v0.2.0, 2026-03-01).
 
 ## Next candidate bolts
+- **B-001:** Publish to PyPI (M)
 - **B-002:** CI pipeline setup (M)
-- **B-003:** Config file permission enforcement (S)
+- **B-003:** Enforce .env file permissions (S)
 - **B-004:** Request timeout (S)
