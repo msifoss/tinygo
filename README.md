@@ -55,7 +55,7 @@ tinygo config set-key
 # API key saved.
 ```
 
-This saves the key to `~/.tinygo/config.json`.
+This saves the key to `~/.tinygo/.env`.
 
 ### Option 2: Environment variable
 
@@ -77,14 +77,15 @@ When multiple sources are present, TinyGo resolves the API key with this priorit
 |----------|--------|---------|
 | 1 (highest) | `--api-key` flag | `tinygo deploy index.html --api-key abc` |
 | 2 | `TIINY_API_KEY` env var | `export TIINY_API_KEY=abc` |
-| 3 (lowest) | Config file | `~/.tinygo/config.json` |
+| 3 (lowest) | `.env` file | `~/.tinygo/.env` |
 
 ### View current config
 
 ```bash
 tinygo config show
 # api_key: ddc9...5e45
-# config path: /Users/you/.tinygo/config.json
+# secrets path: /Users/you/.tinygo/.env
+# config path: /Users/you/.tinygo/config.yaml
 ```
 
 The API key is always masked in output.
@@ -273,14 +274,14 @@ flowchart LR
 
     B -- "1. --api-key flag" --> B
     B -- "2. TIINY_API_KEY env" --> B
-    B -- "3. ~/.tinygo/config.json" --> B
+    B -- "3. ~/.tinygo/.env" --> B
 ```
 
 **`cli.py`** defines the Click command group and handles user interaction (prompts, confirmations, `--help`). Each command resolves an API key, builds a `TiinyClient`, calls the relevant method, and formats the response with Rich.
 
 **`api.py`** contains `TiinyClient`, a thin wrapper over the four tiiny.host API endpoints. It manages the `requests.Session`, multipart form-data encoding, domain normalization (appending `.tiiny.site`), and error handling via `TiinyError`.
 
-**`config.py`** reads and writes `~/.tinygo/config.json` and implements the three-tier API key resolution (flag > env > file).
+**`config.py`** reads and writes `~/.tinygo/.env` (secrets) and `~/.tinygo/config.yaml` (settings), implements the three-tier API key resolution (flag > env var > .env file), and auto-migrates legacy `config.json` on first read.
 
 **`bundle.py`** scans HTML files for local file references (`href`, `src`, CSS `url()`), recursively follows linked HTML, copies everything into a temp staging directory with rewritten paths, and produces a deployable zip.
 

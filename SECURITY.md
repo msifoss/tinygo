@@ -8,21 +8,22 @@ TinyGo is a CLI client that communicates with the tiiny.host external API. It do
 
 | Surface | Risk | Mitigation |
 |---------|------|------------|
-| API key storage | Key stored in plaintext at `~/.tinygo/config.json` | File is in user's home directory; masked in all CLI output (REQ-SEC-001) |
+| API key storage | Key stored in `~/.tinygo/.env` | File is in user's home directory; separated from settings; masked in all CLI output (REQ-SEC-001) |
 | API communication | Man-in-the-middle | All requests use HTTPS (REQ-SEC-003) |
 | Bundle mode file access | Path traversal | Only follows references found in HTML; skips remote URLs |
 | Deployment log | Sensitive data leakage | Log records domain and filename only — no API keys, passwords, or file contents (REQ-SEC-004) |
 
 ### Authentication
 
-- API key is provided via `--api-key` flag, `TIINY_API_KEY` environment variable, or `~/.tinygo/config.json`
+- API key is provided via `--api-key` flag, `TIINY_API_KEY` environment variable, or `~/.tinygo/.env`
 - Key is sent as `x-api-key` HTTP header over HTTPS
 - Key is masked to first 4 and last 4 characters in all display output
 
 ### Data Protection
 
 - No data is stored beyond the config file and deployment log
-- Config file: `~/.tinygo/config.json` — contains API key
+- Secrets file: `~/.tinygo/.env` — contains API key
+- Settings file: `~/.tinygo/config.yaml` — contains non-sensitive settings
 - Deployment log: `~/.tinygo/deployments.log` — contains timestamps, domains, filenames, and URLs only
 - Bundle temp files are created in the system temp directory and cleaned up in a `finally` block
 

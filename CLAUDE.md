@@ -18,7 +18,7 @@ tinygo/
 └── __init__.py  # Version string
 ```
 
-**Data flow:** CLI command -> resolve API key (flag > env > config file) -> TiinyClient -> tiiny.host API -> Rich output. Bundle and log modules are called from CLI when applicable.
+**Data flow:** CLI command -> resolve API key (flag > env var > .env file) -> TiinyClient -> tiiny.host API -> Rich output. Bundle and log modules are called from CLI when applicable.
 
 **External API:** All requests go to `https://ext.tiiny.host` with `x-api-key` header auth. Four endpoints: POST/PUT `/v1/upload`, DELETE `/v1/delete`, GET `/v1/profile`.
 
