@@ -30,7 +30,7 @@ def test_generate_password_length():
 
 
 def test_generate_password_character_set():
-    allowed = set(string.ascii_letters + string.digits + string.punctuation)
+    allowed = set(string.ascii_letters + string.digits + "!#$%&*+-=?@^_")
     pw = generate_password()
     assert all(c in allowed for c in pw)
 

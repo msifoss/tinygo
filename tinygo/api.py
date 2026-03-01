@@ -18,7 +18,7 @@ def _normalize_domain(domain: str) -> str:
     return domain
 
 
-_PASSWORD_ALPHABET = string.ascii_letters + string.digits + string.punctuation
+_PASSWORD_ALPHABET = string.ascii_letters + string.digits + "!#$%&*+-=?@^_"
 
 
 def generate_password(length: int = 15) -> str:
