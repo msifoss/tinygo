@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-03-01
+
+### Fixed
+- Restricted password alphabet to web-safe special characters (`!#$%&*+-=?@^_`), replacing full `string.punctuation` which included backticks, quotes, and backslashes that broke tiiny.host password forms
+
 ## [0.3.0] - 2026-03-01
 
 ### Added
