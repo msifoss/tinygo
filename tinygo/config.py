@@ -49,11 +49,12 @@ def _load_env_key() -> str | None:
 
 
 def _save_env_key(key: str) -> None:
-    """Write TIINY_API_KEY to the .env file."""
+    """Write TIINY_API_KEY to the .env file (owner-only permissions)."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     if not ENV_FILE.exists():
-        ENV_FILE.touch()
+        ENV_FILE.touch(mode=0o600)
     dotenv_set_key(str(ENV_FILE), "TIINY_API_KEY", key)
+    ENV_FILE.chmod(0o600)
 
 
 def _load_yaml_config() -> dict:

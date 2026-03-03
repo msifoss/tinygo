@@ -46,6 +46,8 @@ def scan_html(html_path: Path) -> list[tuple[str, Path]]:
     """Parse one HTML file and return ``(raw_ref, resolved_path)`` pairs.
 
     Only references that resolve to existing local files are returned.
+    Symlinks that resolve outside the entry file's directory are skipped
+    to prevent symlink traversal attacks.
     """
     text = html_path.read_text(errors="replace")
 
@@ -61,7 +63,17 @@ def scan_html(html_path: Path) -> list[tuple[str, Path]]:
     results: list[tuple[str, Path]] = []
     base_dir = html_path.parent
     for raw in scanner.refs:
-        resolved = (base_dir / raw).resolve()
+        target = base_dir / raw
+        # Reject symlinks whose real path differs from the resolved path
+        # (i.e. the link points somewhere else on the filesystem).
+        if target.is_symlink():
+            real = target.resolve()
+            # Allow symlinks within the same directory tree only.
+            try:
+                real.relative_to(base_dir.resolve())
+            except ValueError:
+                continue
+        resolved = target.resolve()
         if resolved.is_file():
             results.append((raw, resolved))
     return results

@@ -174,7 +174,7 @@ def test_no_auth_redirects_to_login():
 
 
 def test_login_redirect_state_encodes_original_uri():
-    """State parameter in login redirect contains the original URI."""
+    """State parameter in login redirect contains a signed state with the original URI."""
     event = _make_event(uri="/sites/mysite/page.html")
 
     with patch.object(auth, "_load_config", return_value=SAMPLE_CONFIG):
@@ -187,9 +187,9 @@ def test_login_redirect_state_encodes_original_uri():
     params = urllib.parse.parse_qs(parsed.query)
     state = params["state"][0]
 
-    # Decode state
-    decoded = auth._base64url_decode(state).decode("utf-8")
-    assert decoded == "/sites/mysite/page.html"
+    # Verify the signed state contains the original URI
+    verified_uri = auth._verify_state(SAMPLE_CONFIG, state)
+    assert verified_uri == "/sites/mysite/page.html"
 
 
 # ── Callback handler ─────────────────────────────────────────────────────
@@ -208,9 +208,10 @@ def test_callback_missing_code_returns_401():
 
 def test_callback_exchange_failure_returns_401():
     """Callback returns 401 when token exchange fails."""
+    state = auth._build_state(SAMPLE_CONFIG, "/page.html")
     event = _make_event(
         uri="/_auth/callback",
-        querystring="code=auth-code-123&state=abc",
+        querystring=f"code=auth-code-123&state={state}",
     )
 
     with patch.object(auth, "_load_config", return_value=SAMPLE_CONFIG), \
@@ -224,7 +225,7 @@ def test_callback_exchange_failure_returns_401():
 def test_callback_success_sets_cookies_and_redirects():
     """Successful callback sets cookie and redirects to original URI."""
     original_uri = "/sites/mysite/index.html"
-    state = _base64url_encode(original_uri.encode("utf-8"))
+    state = auth._build_state(SAMPLE_CONFIG, original_uri)
     event = _make_event(
         uri="/_auth/callback",
         querystring=f"code=auth-code-123&state={state}",
@@ -261,26 +262,32 @@ def test_callback_success_sets_cookies_and_redirects():
     assert "Max-Age=3600" in id_cookie
 
 
-def test_callback_no_state_redirects_to_root():
-    """Callback without state param redirects to /."""
+def test_callback_no_state_returns_401():
+    """Callback without state param returns 401 (CSRF protection)."""
     event = _make_event(
         uri="/_auth/callback",
         querystring="code=auth-code-123",
     )
 
-    token_response = {
-        "id_token": "id-token-value",
-        "access_token": "access-token-value",
-        "expires_in": 3600,
-    }
-
-    with patch.object(auth, "_load_config", return_value=SAMPLE_CONFIG), \
-         patch.object(auth, "_exchange_code_for_tokens", return_value=token_response):
+    with patch.object(auth, "_load_config", return_value=SAMPLE_CONFIG):
         result = auth.handler(event, None)
 
-    assert result["status"] == "302"
-    location = result["headers"]["location"][0]["value"]
-    assert location == "https://d111.cloudfront.net/"
+    assert result["status"] == "401"
+    assert "Missing state" in result["body"]
+
+
+def test_callback_invalid_state_returns_401():
+    """Callback with tampered state param returns 401."""
+    event = _make_event(
+        uri="/_auth/callback",
+        querystring="code=auth-code-123&state=tampered-value",
+    )
+
+    with patch.object(auth, "_load_config", return_value=SAMPLE_CONFIG):
+        result = auth.handler(event, None)
+
+    assert result["status"] == "401"
+    assert "Invalid state" in result["body"]
 
 
 # ── Helper functions ──────────────────────────────────────────────────────

@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- `.env` file now created with `0o600` permissions — owner-only read/write (REQ-SEC-002)
+- Symlinks resolving outside the entry HTML's directory are now rejected during bundling (REQ-SEC-005)
+- JWKS cache in Lambda@Edge now refreshes after 1 hour instead of persisting for Lambda lifetime (REQ-SEC-012)
+- OAuth2 callback state parameter is now HMAC-signed with a cryptographic nonce to prevent CSRF (REQ-SEC-013)
+
+### Changed
+- All TiinyClient HTTP calls now have a 30-second timeout (B-004)
+- Test count: 110 → 111
+
+## [0.5.0] - 2026-03-01
+
+### Added
+- AWS backend: deploy sites to S3 + CloudFront via `tinygo aws deploy`
+- AWS infrastructure provisioning via SAM (`tinygo aws init`) — creates S3 bucket, CloudFront distribution, Cognito user pool, and Lambda@Edge auth
+- Cognito Hosted UI login with cookie-based authentication for browser users
+- AWS commands: `aws init`, `aws deploy`, `aws update`, `aws delete`, `aws list`, `aws status`
+- `AWSClient` module (`aws_client.py`) — boto3 wrapper for S3 uploads, CloudFront invalidation, site listing
+- `AWSError` exception for AWS-specific error handling
+- Lambda@Edge auth handler for viewer-request authentication
+- AWS user guide (`docs/AWS-USER-GUIDE.md`)
+- `boto3 >= 1.28` as optional dependency (`pip install tinygo[aws]`)
+- 60 new tests (test_aws_cli, test_aws_client, test_lambda_auth)
+
+### Changed
+- `config.py` extended with `get_aws_config()`, `set_aws_config()`, `is_aws_configured()` for AWS config in `config.yaml`
+- `bundle.py` updated to support `create_bundle_dir()` / `cleanup_bundle_dir()` for AWS deploy flow
+- `cli.py` registers `aws` subcommand group
+- Test count: 50 → 110
+
 ## [0.4.0] - 2026-03-01
 
 ### Changed

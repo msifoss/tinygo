@@ -99,6 +99,7 @@ def _sam_deploy(infra_dir, stack_name, region, domain_prefix, guided):
         "sam", "deploy",
         "--stack-name", stack_name,
         "--region", region,
+        "--resolve-s3",
         "--capabilities", "CAPABILITY_IAM",
         "--no-fail-on-empty-changeset",
         "--parameter-overrides", f"CognitoDomainPrefix={domain_prefix}",

@@ -10,7 +10,9 @@ The /_auth/callback path handles the OAuth2 authorization code exchange.
 
 import base64
 import hashlib
+import hmac
 import json
+import os
 import re
 import struct
 import time
@@ -22,6 +24,8 @@ from pathlib import Path
 _CONFIG_PATH = Path(__file__).parent / "config.json"
 _CONFIG = None
 _JWKS_CACHE = None
+_JWKS_CACHE_TIME = 0
+_JWKS_TTL = 3600  # Re-fetch JWKS after 1 hour
 
 
 def _load_config():
@@ -32,13 +36,14 @@ def _load_config():
 
 
 def _get_jwks(region, user_pool_id):
-    """Fetch and cache the Cognito JWKS."""
-    global _JWKS_CACHE
-    if _JWKS_CACHE is not None:
+    """Fetch and cache the Cognito JWKS (refreshed after TTL expires)."""
+    global _JWKS_CACHE, _JWKS_CACHE_TIME
+    if _JWKS_CACHE is not None and (time.time() - _JWKS_CACHE_TIME) < _JWKS_TTL:
         return _JWKS_CACHE
     url = f"https://cognito-idp.{region}.amazonaws.com/{user_pool_id}/.well-known/jwks.json"
     with urllib.request.urlopen(url, timeout=3) as resp:
         _JWKS_CACHE = json.loads(resp.read())
+    _JWKS_CACHE_TIME = time.time()
     return _JWKS_CACHE
 
 
@@ -242,14 +247,44 @@ def _validate_jwt_claims(payload, config):
     return True
 
 
+def _build_state(config, request_uri):
+    """Build a signed state parameter containing a CSRF nonce and the original URI.
+
+    Format: base64url(JSON({"nonce": ..., "uri": ..., "sig": ...}))
+    The sig is HMAC-SHA256(nonce + uri, client_secret).
+    """
+    client_secret = config.get("client_secret", "")
+    nonce = _base64url_encode(os.urandom(16))
+    message = f"{nonce}:{request_uri}".encode("utf-8")
+    sig = hmac.new(client_secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+    payload = json.dumps({"nonce": nonce, "uri": request_uri, "sig": sig})
+    return _base64url_encode(payload.encode("utf-8"))
+
+
+def _verify_state(config, state):
+    """Verify the signed state parameter. Returns the original URI or None."""
+    client_secret = config.get("client_secret", "")
+    try:
+        payload = json.loads(_base64url_decode(state).decode("utf-8"))
+    except Exception:
+        return None
+    nonce = payload.get("nonce", "")
+    uri = payload.get("uri", "/")
+    sig = payload.get("sig", "")
+    message = f"{nonce}:{uri}".encode("utf-8")
+    expected = hmac.new(client_secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        return None
+    return uri
+
+
 def _build_login_url(config, request_uri):
-    """Build the Cognito Hosted UI login URL with state parameter."""
+    """Build the Cognito Hosted UI login URL with signed state parameter."""
     cognito_domain = config["cognito_domain"]
     client_id = config["client_id"]
     callback_url = config["callback_url"]
 
-    # Encode the original URI in state so we can redirect back after login
-    state = _base64url_encode(request_uri.encode("utf-8"))
+    state = _build_state(config, request_uri)
 
     params = urllib.parse.urlencode({
         "response_type": "code",
@@ -312,17 +347,19 @@ def _handle_callback(request, config):
     if not code:
         return _unauthorized("Missing authorization code")
 
+    # Verify CSRF nonce in state before exchanging the code
+    redirect_uri = "/"
+    if state:
+        verified_uri = _verify_state(config, state)
+        if verified_uri is None:
+            return _unauthorized("Invalid state parameter")
+        redirect_uri = verified_uri
+    else:
+        return _unauthorized("Missing state parameter")
+
     tokens = _exchange_code_for_tokens(code, config)
     if not tokens:
         return _unauthorized("Token exchange failed")
-
-    # Recover original URI from state
-    redirect_uri = "/"
-    if state:
-        try:
-            redirect_uri = _base64url_decode(state).decode("utf-8")
-        except Exception:
-            redirect_uri = "/"
 
     # Build Set-Cookie headers
     expires_in = tokens.get("expires_in", 3600)

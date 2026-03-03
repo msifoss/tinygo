@@ -10,23 +10,29 @@ TinyGo wraps the tiiny.host external API, providing command-line deploy, update,
 
 ```
 tinygo/
-├── cli.py       # Click command group — all user-facing commands and Rich output
-├── api.py       # TiinyClient — HTTP wrapper around tiiny.host REST API
-├── config.py    # Config I/O (~/.tinygo/.env + config.yaml), API key resolution, legacy migration
-├── bundle.py    # HTML scanning, file staging, path rewriting, zip creation
-├── log.py       # Deployment event logging (~/.tinygo/deployments.log)
-└── __init__.py  # Version string
+├── cli.py         # Click command group — tiiny.host commands and Rich output
+├── api.py         # TiinyClient — HTTP wrapper around tiiny.host REST API
+├── aws_cli.py     # Click command group — AWS (S3 + CloudFront + Cognito) commands
+├── aws_client.py  # AWSClient — boto3 wrapper for S3 uploads, CloudFront invalidation
+├── config.py      # Config I/O (~/.tinygo/.env + config.yaml), API key resolution, AWS config, legacy migration
+├── bundle.py      # HTML scanning, file staging, path rewriting, zip creation
+├── log.py         # Deployment event logging (~/.tinygo/deployments.log)
+└── __init__.py    # Version string
 ```
 
-**Data flow:** CLI command -> resolve API key (flag > env var > .env file) -> TiinyClient -> tiiny.host API -> Rich output. Bundle and log modules are called from CLI when applicable.
+**Data flow (tiiny.host):** CLI command -> resolve API key (flag > env var > .env file) -> TiinyClient -> tiiny.host API -> Rich output. Bundle and log modules are called from CLI when applicable.
 
-**External API:** All requests go to `https://ext.tiiny.host` with `x-api-key` header auth. Four endpoints: POST/PUT `/v1/upload`, DELETE `/v1/delete`, GET `/v1/profile`.
+**Data flow (AWS):** CLI command -> resolve AWS config (config.yaml) -> AWSClient -> S3/CloudFront via boto3 -> Rich output. Infrastructure provisioned via SAM (Cognito + Lambda@Edge for auth).
+
+**External API (tiiny.host):** All requests go to `https://ext.tiiny.host` with `x-api-key` header auth. Four endpoints: POST/PUT `/v1/upload`, DELETE `/v1/delete`, GET `/v1/profile`.
+
+**AWS services:** S3 (file hosting), CloudFront (CDN), Cognito (user auth with Hosted UI), Lambda@Edge (cookie-based auth enforcement).
 
 ## Project Structure
 
 ```
 tinygo/                  # Repository root
-├── tinygo/              # Python package (6 modules, ~695 lines)
+├── tinygo/              # Python package (8 modules, ~1410 lines)
 ├── tests/               # Pytest test suite
 ├── docs/                # Documentation (requirements, standards, PM)
 ├── pyproject.toml       # Package metadata, deps, entry point
@@ -43,7 +49,7 @@ tinygo/                  # Repository root
 - **Install:** `pip install -e .` (editable mode)
 - **Run:** `tinygo <command>` after install
 - **Test:** `pytest tests/` from repo root
-- **Dependencies:** click >= 8.0, python-dotenv >= 1.0, pyyaml >= 6.0, requests >= 2.28, rich >= 13.0 (no dev deps yet)
+- **Dependencies:** click >= 8.0, python-dotenv >= 1.0, pyyaml >= 6.0, requests >= 2.28, rich >= 13.0; optional: boto3 >= 1.28 (for AWS features, `pip install tinygo[aws]`)
 
 ## Conventions
 
@@ -56,8 +62,8 @@ tinygo/                  # Repository root
 
 ## Current Status
 
-- **Version:** 0.4.0
-- **Features:** deploy, update, delete, list, profile, config, bundle (--bundle flag), log, auto noindex + password protection on all deployments
-- **Tests:** 50 passing (pytest — test_api, test_bundle, test_config, test_log)
+- **Version:** 0.5.0
+- **Features:** deploy, update, delete, list, profile, config, bundle (default on), log, auto noindex + password protection; AWS backend (S3 + CloudFront + Cognito auth with Hosted UI login)
+- **Tests:** 111 passing (pytest — test_api, test_aws_cli, test_aws_client, test_bundle, test_config, test_lambda_auth, test_log)
 - **CI/CD:** None (manual install and deploy)
-- **Deployments:** Manual via `tinygo deploy`
+- **Deployments:** Manual via `tinygo deploy` (tiiny.host) or `tinygo aws deploy` (AWS)

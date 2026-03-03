@@ -2,7 +2,7 @@
 
 ## Security Model
 
-TinyGo is a CLI client that communicates with the tiiny.host external API. It does not run a server, accept network connections, or process untrusted input beyond local HTML files.
+TinyGo is a CLI client that communicates with the tiiny.host external API and optionally deploys to AWS (S3 + CloudFront + Cognito). The tiiny.host path does not run a server. The AWS path provisions infrastructure with Lambda@Edge for cookie-based authentication.
 
 ### Threat Surface
 
@@ -12,12 +12,26 @@ TinyGo is a CLI client that communicates with the tiiny.host external API. It do
 | API communication | Man-in-the-middle | All requests use HTTPS (REQ-SEC-003) |
 | Bundle mode file access | Path traversal | Only follows references found in HTML; skips remote URLs |
 | Deployment log | Sensitive data leakage | Log records domain and filename only — no API keys, passwords, or file contents (REQ-SEC-004) |
+| AWS credentials | IAM access | Uses default AWS credential chain (aws configure / env vars); no credentials stored by TinyGo |
+| Cognito client secret | Secret in Lambda package | Baked into `config.json` inside Lambda@Edge deployment package at build time (REQ-SEC-006) |
+| Lambda@Edge JWT auth | Token bypass | RS256 signature verification against Cognito JWKS; validates exp, iss, aud claims (REQ-SEC-007) |
+| Cookie-based auth | Session hijacking | Cookies set with Secure, HttpOnly, SameSite=Lax attributes (REQ-SEC-008) |
+| OAuth2 callback | CSRF / code injection | State parameter encodes original URI; authorization code exchanged server-side (REQ-SEC-009) |
+| S3 bucket | Public access | All public access blocked; access only via CloudFront OAC (REQ-SEC-010) |
+| SAM CLI invocation | Command injection | Arguments passed as list (not shell string); only trusted values from stack outputs (REQ-SEC-011) |
 
 ### Authentication
 
+**tiiny.host path:**
 - API key is provided via `--api-key` flag, `TIINY_API_KEY` environment variable, or `~/.tinygo/.env`
 - Key is sent as `x-api-key` HTTP header over HTTPS
 - Key is masked to first 4 and last 4 characters in all display output
+
+**AWS path:**
+- AWS credentials resolved via default boto3 credential chain (environment, profile, IAM role)
+- Browser users authenticate via Cognito Hosted UI (OAuth2 authorization code flow)
+- Lambda@Edge validates JWT tokens (RS256 with JWKS verification)
+- Auth cookies: `tinygo_id_token`, `tinygo_access_token` (1h TTL), `tinygo_refresh_token` (30d TTL)
 
 ### Data Protection
 
@@ -29,8 +43,8 @@ TinyGo is a CLI client that communicates with the tiiny.host external API. It do
 
 ## Known Limitations
 
-- Config file does not enforce restrictive file permissions (REQ-SEC-002 — not yet implemented)
-- Bundle mode does not guard against symlink traversal (REQ-SEC-005 — not yet implemented)
+- Cognito client secret is embedded in Lambda@Edge deployment package — accessible to anyone with Lambda read access (REQ-SEC-006 — consider Secrets Manager in future)
+- Lambda@Edge IAM role uses managed `AWSLambdaBasicExecutionRole` — minimal, but no custom policy restricting scope (REQ-SEC-014)
 
 ## Vulnerability Reporting
 
@@ -46,4 +60,6 @@ We will acknowledge receipt within 48 hours and aim to provide a fix or mitigati
 
 | Date | Type | Scope | Findings |
 |------|------|-------|----------|
+| 2026-03-02 | Security hardening | config.py, bundle.py, auth.py, api.py | Fixed REQ-SEC-002 (.env permissions), REQ-SEC-005 (symlink guard), REQ-SEC-012 (JWKS TTL), REQ-SEC-013 (CSRF nonce); added request timeout (B-004); 2 open items remain (REQ-SEC-006, REQ-SEC-014) |
+| 2026-03-02 | AWS module review | aws_cli.py, aws_client.py, Lambda@Edge auth, SAM template | 4 new items (REQ-SEC-006, REQ-SEC-012, REQ-SEC-013, REQ-SEC-014); 6 new controls documented (REQ-SEC-006–011) |
 | 2026-03-01 | Initial assessment | All modules | 2 open items (REQ-SEC-002, REQ-SEC-005) |

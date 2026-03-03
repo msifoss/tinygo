@@ -35,11 +35,15 @@ class TiinyError(Exception):
         super().__init__(f"HTTP {status_code}: {detail}")
 
 
+DEFAULT_TIMEOUT = 30  # seconds
+
+
 class TiinyClient:
     """Wrapper around the tiiny.host external API."""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, timeout: int = DEFAULT_TIMEOUT):
         self.api_key = api_key
+        self.timeout = timeout
         self.session = requests.Session()
         self.session.headers["x-api-key"] = api_key
 
@@ -74,7 +78,7 @@ class TiinyClient:
             data: dict = {"siteSettings": json.dumps(site_settings)}
             if domain:
                 data["domain"] = _normalize_domain(domain)
-            resp = self.session.post(f"{BASE_URL}/v1/upload", files=files, data=data)
+            resp = self.session.post(f"{BASE_URL}/v1/upload", files=files, data=data, timeout=self.timeout)
 
         self._raise_for_error(resp)
         return resp.json(), password_used
@@ -103,7 +107,7 @@ class TiinyClient:
                 "domain": _normalize_domain(domain),
                 "siteSettings": json.dumps(site_settings),
             }
-            resp = self.session.put(f"{BASE_URL}/v1/upload", files=files, data=data)
+            resp = self.session.put(f"{BASE_URL}/v1/upload", files=files, data=data, timeout=self.timeout)
 
         self._raise_for_error(resp)
         return resp.json(), password_used
@@ -113,12 +117,13 @@ class TiinyClient:
         resp = self.session.delete(
             f"{BASE_URL}/v1/delete",
             files={"domain": (None, _normalize_domain(domain))},
+            timeout=self.timeout,
         )
         self._raise_for_error(resp)
         return resp.json()
 
     def profile(self) -> dict:
         """Fetch account profile via GET /v1/profile."""
-        resp = self.session.get(f"{BASE_URL}/v1/profile")
+        resp = self.session.get(f"{BASE_URL}/v1/profile", timeout=self.timeout)
         self._raise_for_error(resp)
         return resp.json()
