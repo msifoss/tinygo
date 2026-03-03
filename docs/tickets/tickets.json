@@ -1,0 +1,53 @@
+{
+  "last_sync": "2026-03-03T03:26:42Z",
+  "tickets": {
+    "20260301-create-ado-repo": {
+      "file": "20260301-143357-create-ado-repo-draft.md",
+      "ado_id": null,
+      "ado_url": null,
+      "status": "draft",
+      "assigned_to": null,
+      "priority": 2,
+      "created": "2026-03-01T14:33:57",
+      "submitted": null,
+      "last_synced": null,
+      "ado_state": null
+    },
+    "20260301-cleanup-failed-stack": {
+      "file": "20260301-143402-cleanup-failed-stack-draft.md",
+      "ado_id": null,
+      "ado_url": null,
+      "status": "draft",
+      "assigned_to": null,
+      "priority": 2,
+      "created": "2026-03-01T14:34:02",
+      "submitted": null,
+      "last_synced": null,
+      "ado_state": null
+    },
+    "20260301-create-tinygo-account": {
+      "file": "20260301-143407-create-tinygo-account-draft.md",
+      "ado_id": null,
+      "ado_url": null,
+      "status": "draft",
+      "assigned_to": null,
+      "priority": 2,
+      "created": "2026-03-01T14:34:07",
+      "submitted": null,
+      "last_synced": null,
+      "ado_state": null
+    },
+    "20260301-create-permission-set": {
+      "file": "20260301-143412-create-permission-set-draft.md",
+      "ado_id": null,
+      "ado_url": null,
+      "status": "draft",
+      "assigned_to": null,
+      "priority": 2,
+      "created": "2026-03-01T14:34:12",
+      "submitted": null,
+      "last_synced": null,
+      "ado_state": null
+    }
+  }
+}
