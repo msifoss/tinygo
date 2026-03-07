@@ -294,87 +294,12 @@ def init(region, stack_name, domain_prefix, guided):
     console.print(table)
 
 
-# ── deploy ───────────────────────────────────────────────────────────────
+# ── deploy / update shared flow ──────────────────────────────────────────
 
 
-@aws.command()
-@click.argument("file", type=click.Path(exists=True))
-@click.option("--site", "-s", required=True, help="Site name (S3 prefix).")
-@click.option("--no-bundle", is_flag=True, help="Skip bundling linked local files.")
-@click.option("--no-invalidate", is_flag=True, help="Skip CloudFront cache invalidation.")
-def deploy(file, site, no_bundle, no_invalidate):
-    """Deploy a file or HTML project to AWS."""
-    from pathlib import Path
-
+def _upload_site_flow(client, file, site, no_bundle, no_invalidate, action):
+    """Shared bundle → upload → invalidate → log flow for deploy and update."""
     from tinygo.bundle import cleanup_bundle_dir, create_bundle_dir
-
-    client = _get_aws_client()
-
-    if client.site_exists(site):
-        console.print(f"[red]Site '{site}' already exists.[/red] Use [bold]tinygo aws update[/bold] instead.")
-        raise SystemExit(1)
-
-    staging_dir = None
-    try:
-        if no_bundle:
-            # Use the file's parent directory as-is (single file)
-            file_path = Path(file).resolve()
-            staging_dir = file_path.parent
-            is_temp = False
-        else:
-            with console.status("Bundling..."):
-                staging_dir = create_bundle_dir(file)
-            is_temp = True
-
-        with console.status("Uploading to S3..."):
-            keys = client.upload_site(site, staging_dir)
-
-        if not no_invalidate:
-            with console.status("Invalidating CloudFront cache..."):
-                inv_id = client.invalidate_cache(site)
-            console.print(f"[dim]Invalidation: {inv_id}[/dim]")
-
-        cfg = get_aws_config()
-        domain = cfg.get("cloudfront_domain", "")
-        url = f"https://{domain}/sites/{site}/index.html"
-
-        log_event("AWS_DEPLOY", site, success=True, file_path=file, url=url)
-        console.print(f"[green]Deployed![/green] {len(keys)} files uploaded.")
-        console.print(f"[bold]URL:[/bold] {url}")
-
-    except Exception as e:
-        if not isinstance(e, SystemExit):
-            from tinygo.aws_client import AWSError
-
-            detail = e.detail if isinstance(e, AWSError) else str(e)
-            log_event("AWS_DEPLOY", site, success=False, file_path=file, error=detail)
-            console.print(f"[red]Deploy failed:[/red] {detail}")
-            raise SystemExit(1)
-        raise
-    finally:
-        if staging_dir and is_temp:
-            cleanup_bundle_dir(staging_dir)
-
-
-# ── update ───────────────────────────────────────────────────────────────
-
-
-@aws.command()
-@click.argument("file", type=click.Path(exists=True))
-@click.option("--site", "-s", required=True, help="Site name (S3 prefix).")
-@click.option("--no-bundle", is_flag=True, help="Skip bundling linked local files.")
-@click.option("--no-invalidate", is_flag=True, help="Skip CloudFront cache invalidation.")
-def update(file, site, no_bundle, no_invalidate):
-    """Update an existing AWS-hosted site with new content."""
-    from pathlib import Path
-
-    from tinygo.bundle import cleanup_bundle_dir, create_bundle_dir
-
-    client = _get_aws_client()
-
-    if not client.site_exists(site):
-        console.print(f"[red]Site '{site}' does not exist.[/red] Use [bold]tinygo aws deploy[/bold] first.")
-        raise SystemExit(1)
 
     staging_dir = None
     is_temp = False
@@ -399,8 +324,9 @@ def update(file, site, no_bundle, no_invalidate):
         domain = cfg.get("cloudfront_domain", "")
         url = f"https://{domain}/sites/{site}/index.html"
 
-        log_event("AWS_UPDATE", site, success=True, file_path=file, url=url)
-        console.print(f"[green]Updated![/green] {len(keys)} files uploaded.")
+        label = "Deployed" if action == "AWS_DEPLOY" else "Updated"
+        log_event(action, site, success=True, file_path=file, url=url)
+        console.print(f"[green]{label}![/green] {len(keys)} files uploaded.")
         console.print(f"[bold]URL:[/bold] {url}")
 
     except Exception as e:
@@ -408,13 +334,52 @@ def update(file, site, no_bundle, no_invalidate):
             from tinygo.aws_client import AWSError
 
             detail = e.detail if isinstance(e, AWSError) else str(e)
-            log_event("AWS_UPDATE", site, success=False, file_path=file, error=detail)
-            console.print(f"[red]Update failed:[/red] {detail}")
+            log_event(action, site, success=False, file_path=file, error=detail)
+            verb = "Deploy" if action == "AWS_DEPLOY" else "Update"
+            console.print(f"[red]{verb} failed:[/red] {detail}")
             raise SystemExit(1)
         raise
     finally:
         if staging_dir and is_temp:
             cleanup_bundle_dir(staging_dir)
+
+
+# ── deploy ───────────────────────────────────────────────────────────────
+
+
+@aws.command()
+@click.argument("file", type=click.Path(exists=True))
+@click.option("--site", "-s", required=True, help="Site name (S3 prefix).")
+@click.option("--no-bundle", is_flag=True, help="Skip bundling linked local files.")
+@click.option("--no-invalidate", is_flag=True, help="Skip CloudFront cache invalidation.")
+def deploy(file, site, no_bundle, no_invalidate):
+    """Deploy a file or HTML project to AWS."""
+    client = _get_aws_client()
+
+    if client.site_exists(site):
+        console.print(f"[red]Site '{site}' already exists.[/red] Use [bold]tinygo aws update[/bold] instead.")
+        raise SystemExit(1)
+
+    _upload_site_flow(client, file, site, no_bundle, no_invalidate, "AWS_DEPLOY")
+
+
+# ── update ───────────────────────────────────────────────────────────────
+
+
+@aws.command()
+@click.argument("file", type=click.Path(exists=True))
+@click.option("--site", "-s", required=True, help="Site name (S3 prefix).")
+@click.option("--no-bundle", is_flag=True, help="Skip bundling linked local files.")
+@click.option("--no-invalidate", is_flag=True, help="Skip CloudFront cache invalidation.")
+def update(file, site, no_bundle, no_invalidate):
+    """Update an existing AWS-hosted site with new content."""
+    client = _get_aws_client()
+
+    if not client.site_exists(site):
+        console.print(f"[red]Site '{site}' does not exist.[/red] Use [bold]tinygo aws deploy[/bold] first.")
+        raise SystemExit(1)
+
+    _upload_site_flow(client, file, site, no_bundle, no_invalidate, "AWS_UPDATE")
 
 
 # ── delete ───────────────────────────────────────────────────────────────

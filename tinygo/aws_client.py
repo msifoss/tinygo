@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import mimetypes
+import time
 from pathlib import Path
 
 import boto3
@@ -77,8 +78,6 @@ class AWSClient:
 
         Returns the invalidation ID.
         """
-        import time
-
         try:
             resp = self.cf.create_invalidation(
                 DistributionId=self.distribution_id,

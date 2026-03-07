@@ -210,7 +210,9 @@ def create_bundle(html_path: str | Path) -> Path:
     """Scan an HTML file, bundle dependencies, and return the path to a temp zip."""
     staging = create_bundle_dir(html_path)
 
-    zip_path = Path(tempfile.mktemp(prefix="tinygo_bundle_", suffix=".zip"))
+    tmp = tempfile.NamedTemporaryFile(prefix="tinygo_bundle_", suffix=".zip", delete=False)
+    tmp.close()
+    zip_path = Path(tmp.name)
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for root, _dirs, files in os.walk(staging):
             for fname in files:

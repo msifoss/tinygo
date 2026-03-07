@@ -33,6 +33,41 @@ def main():
 main.add_command(aws)
 
 
+# ── deploy / update shared flow ──────────────────────────────────────────
+
+
+def _deploy_or_update(client, file, domain, password, no_bundle, action):
+    """Shared bundle → API call → log → output flow for deploy and update."""
+    api_method = client.create if action == "DEPLOY" else client.update
+    label = "Deployed" if action == "DEPLOY" else "Updated"
+    verb = "Deploy" if action == "DEPLOY" else "Update"
+
+    send_file = file
+    zip_path = None
+    try:
+        if not no_bundle:
+            with console.status("Bundling..."):
+                zip_path = create_bundle(file)
+            send_file = str(zip_path)
+
+        with console.status(f"{verb}ing..."):
+            try:
+                result, password_used = api_method(send_file, domain=domain, password=password)
+            except TiinyError as e:
+                log_event(action, domain, success=False, file_path=file, error=e.detail)
+                console.print(f"[red]{verb} failed:[/red] {e.detail}")
+                raise SystemExit(1)
+        data = result.get("data", result)
+        link = data.get("link", domain)
+        url = f"https://{link}"
+        log_event(action, domain, success=True, file_path=file, url=url)
+        console.print(f"[green]{label}![/green] {url}")
+        console.print(f"[bold]Password:[/bold] {password_used}")
+    finally:
+        if zip_path:
+            cleanup_bundle(zip_path)
+
+
 # ── deploy ───────────────────────────────────────────────────────────────
 
 
@@ -47,31 +82,7 @@ def deploy(file, domain, password, no_bundle, api_key):
     if not domain:
         domain = click.prompt("Choose a subdomain")
     client = _get_client(api_key)
-
-    deploy_file = file
-    zip_path = None
-    try:
-        if not no_bundle:
-            with console.status("Bundling..."):
-                zip_path = create_bundle(file)
-            deploy_file = str(zip_path)
-
-        with console.status("Deploying..."):
-            try:
-                result, password_used = client.create(deploy_file, domain=domain, password=password)
-            except TiinyError as e:
-                log_event("DEPLOY", domain, success=False, file_path=file, error=e.detail)
-                console.print(f"[red]Deploy failed:[/red] {e.detail}")
-                raise SystemExit(1)
-        data = result.get("data", result)
-        link = data.get("link", domain)
-        url = f"https://{link}"
-        log_event("DEPLOY", domain, success=True, file_path=file, url=url)
-        console.print(f"[green]Deployed![/green] {url}")
-        console.print(f"[bold]Password:[/bold] {password_used}")
-    finally:
-        if zip_path:
-            cleanup_bundle(zip_path)
+    _deploy_or_update(client, file, domain, password, no_bundle, "DEPLOY")
 
 
 # ── update ───────────────────────────────────────────────────────────────
@@ -86,31 +97,7 @@ def deploy(file, domain, password, no_bundle, api_key):
 def update(file, domain, password, no_bundle, api_key):
     """Update an existing tiiny.host site with new content."""
     client = _get_client(api_key)
-
-    update_file = file
-    zip_path = None
-    try:
-        if not no_bundle:
-            with console.status("Bundling..."):
-                zip_path = create_bundle(file)
-            update_file = str(zip_path)
-
-        with console.status("Updating..."):
-            try:
-                result, password_used = client.update(update_file, domain, password=password)
-            except TiinyError as e:
-                log_event("UPDATE", domain, success=False, file_path=file, error=e.detail)
-                console.print(f"[red]Update failed:[/red] {e.detail}")
-                raise SystemExit(1)
-        data = result.get("data", result)
-        link = data.get("link", domain)
-        url = f"https://{link}"
-        log_event("UPDATE", domain, success=True, file_path=file, url=url)
-        console.print(f"[green]Updated![/green] {url}")
-        console.print(f"[bold]Password:[/bold] {password_used}")
-    finally:
-        if zip_path:
-            cleanup_bundle(zip_path)
+    _deploy_or_update(client, file, domain, password, no_bundle, "UPDATE")
 
 
 # ── delete ───────────────────────────────────────────────────────────────
