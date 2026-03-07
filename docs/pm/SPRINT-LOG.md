@@ -1,5 +1,61 @@
 # Sprint Log
 
+## Bolt 9 — Security Foundation + Team Infrastructure Backlog (2026-03-04)
+
+**Size:** M
+**Scope:** Migrate Cognito client secret to Secrets Manager (B-011), add custom IAM policy for Lambda@Edge (B-012), add team infrastructure backlog tickets (B-013, B-014, B-015).
+
+**Completed:**
+- B-011: Cognito client secret moved from Lambda@Edge deployment package to AWS Secrets Manager
+  - `_get_client_secret()` in auth.py fetches from SM with 1-hour cache and backward-compat fallback
+  - `_store_client_secret_in_sm()` helper in aws_cli.py stores secret via AWS CLI
+  - `config.json` now contains `secret_arn` instead of `client_secret`
+  - SAM template adds `CognitoClientSecret` resource and `CognitoClientSecretArn` output
+- B-012: Custom IAM inline policy (`TinyGoAuthSecrets`) on `AuthFunctionRole` — `secretsmanager:GetSecretValue` scoped to the single secret ARN
+- B-013, B-014, B-015 added to backlog (deploy API, cloud audit log, multi-tenant access control)
+- Updated CHANGELOG, SECURITY (0 open items), BACKLOG, CURRENT-SPRINT
+
+**Metrics:**
+- Tests: 111 → 118 (+7)
+- Files changed: 11
+- Security items resolved: 2 (REQ-SEC-006, REQ-SEC-014)
+- Security items remaining: 0
+
+**Retro:**
+- Backward-compat fallback (config `client_secret` → SM fetch) ensures existing deployments continue working
+- Lazy boto3 import avoids cold start overhead on JWT-only paths
+- All security items from initial assessment are now resolved
+
+---
+
+## Bolt 8 — CI Pipeline & PyPI Publishing (2026-03-02)
+
+**Size:** M
+**Scope:** Add GitHub Actions CI pipeline (lint + test matrix), PyPI release workflow with trusted publisher, LICENSE file, ruff linter config, dev dependencies, and Python 3.9 compatibility fixes.
+
+**Completed:**
+- B-001: PyPI release workflow (`.github/workflows/release.yml`) — tag-triggered, calls CI first, builds sdist+wheel, publishes via OIDC trusted publisher
+- B-002: CI pipeline (`.github/workflows/ci.yml`) — ruff lint + pytest matrix (Python 3.9, 3.11, 3.12, 3.13), reusable via `workflow_call`
+- `from __future__ import annotations` added to 7 source modules for Python 3.9 compatibility
+- MIT LICENSE file created
+- pyproject.toml enhanced: readme, license, authors, keywords, classifiers, project URLs, dev deps, ruff config, pytest config
+- ruff check + format applied across entire codebase (17 auto-fixes + 4 manual fixes)
+- CI badge and `pip install tinygo` added to README.md
+- Updated CHANGELOG, CURRENT-SPRINT, BACKLOG, SPRINT-LOG
+- B-007 (dependency vulnerability scanning) unblocked by CI
+
+**Metrics:**
+- Tests: 111 (no change)
+- Files changed: 18
+- Files created: 3 (LICENSE, ci.yml, release.yml)
+
+**Retro:**
+- ruff found real issues (unused imports, unused variables, unsorted imports, unnecessary f-strings) — good baseline lint
+- Combining CI + PyPI in one bolt ensures the first published release is protected by CI from day one
+- Manual steps remain: configure PyPI trusted publisher, create GitHub `pypi` environment, tag first release
+
+---
+
 ## Bolt 7 — Security Hardening & Doc Hygiene (2026-03-02)
 
 **Size:** M

@@ -1,13 +1,15 @@
 """TinyGo CLI — deploy web pages to tiiny.host."""
 
+from __future__ import annotations
+
 import click
 from rich.console import Console
 from rich.table import Table
 
 from tinygo.api import TiinyClient, TiinyError
+from tinygo.aws_cli import aws
 from tinygo.bundle import cleanup_bundle, create_bundle
 from tinygo.config import get_api_key, get_config, mask_key, set_api_key
-from tinygo.aws_cli import aws
 from tinygo.log import clear_log, log_event, read_log
 
 console = Console()
@@ -17,10 +19,7 @@ def _get_client(api_key: str | None) -> TiinyClient:
     """Resolve the API key and return a TiinyClient, or exit with an error."""
     key = get_api_key(api_key)
     if not key:
-        console.print(
-            "[red]No API key configured.[/red] "
-            "Run [bold]tinygo config set-key[/bold] or pass --api-key."
-        )
+        console.print("[red]No API key configured.[/red] Run [bold]tinygo config set-key[/bold] or pass --api-key.")
         raise SystemExit(1)
     return TiinyClient(key)
 
@@ -232,9 +231,7 @@ def log_cmd(tail, clear):
         while len(parts) < 7:
             parts.append("")
         timestamp, action, status, domain, file_col, size_col, detail = parts[:7]
-        status_styled = (
-            f"[green]{status}[/green]" if status == "SUCCESS" else f"[red]{status}[/red]"
-        )
+        status_styled = f"[green]{status}[/green]" if status == "SUCCESS" else f"[red]{status}[/red]"
         table.add_row(timestamp, action, status_styled, domain, file_col, size_col, detail)
 
     console.print(table)
@@ -272,6 +269,7 @@ def config_show():
         for k, v in settings.items():
             console.print(f"[bold]{k}:[/bold] {v}")
 
-    from tinygo.config import ENV_FILE, CONFIG_YAML_FILE
+    from tinygo.config import CONFIG_YAML_FILE, ENV_FILE
+
     console.print(f"[bold]secrets path:[/bold] {ENV_FILE}")
     console.print(f"[bold]config path:[/bold] {CONFIG_YAML_FILE}")

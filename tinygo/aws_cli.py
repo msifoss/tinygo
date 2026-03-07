@@ -1,5 +1,7 @@
 """TinyGo AWS CLI — deploy web pages to S3 + CloudFront."""
 
+from __future__ import annotations
+
 import json
 import shutil
 import subprocess
@@ -27,10 +29,7 @@ def _get_aws_client():
         raise SystemExit(1)
 
     if not is_aws_configured():
-        console.print(
-            "[red]AWS not configured.[/red] "
-            "Run [bold]tinygo aws init[/bold] first."
-        )
+        console.print("[red]AWS not configured.[/red] Run [bold]tinygo aws init[/bold] first.")
         raise SystemExit(1)
 
     cfg = get_aws_config()
@@ -68,9 +67,19 @@ def _write_lambda_config(infra_dir, config_data):
 def _get_client_secret(region, pool_id, client_id):
     """Retrieve the Cognito app client secret via AWS CLI."""
     result = subprocess.run(
-        ["aws", "cognito-idp", "describe-user-pool-client",
-         "--user-pool-id", pool_id, "--client-id", client_id,
-         "--region", region, "--output", "json"],
+        [
+            "aws",
+            "cognito-idp",
+            "describe-user-pool-client",
+            "--user-pool-id",
+            pool_id,
+            "--client-id",
+            client_id,
+            "--region",
+            region,
+            "--output",
+            "json",
+        ],
         capture_output=True,
         text=True,
     )
@@ -78,6 +87,30 @@ def _get_client_secret(region, pool_id, client_id):
         return None
     data = json.loads(result.stdout)
     return data.get("UserPoolClient", {}).get("ClientSecret")
+
+
+def _store_client_secret_in_sm(region, secret_arn, client_secret):
+    """Store the Cognito client secret in Secrets Manager via AWS CLI."""
+    result = subprocess.run(
+        [
+            "aws",
+            "secretsmanager",
+            "put-secret-value",
+            "--secret-id",
+            secret_arn,
+            "--secret-string",
+            client_secret,
+            "--region",
+            region,
+            "--output",
+            "json",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False
+    return True
 
 
 def _sam_build(infra_dir):
@@ -96,13 +129,18 @@ def _sam_build(infra_dir):
 def _sam_deploy(infra_dir, stack_name, region, domain_prefix, guided):
     """Run sam deploy and return True on success."""
     deploy_cmd = [
-        "sam", "deploy",
-        "--stack-name", stack_name,
-        "--region", region,
+        "sam",
+        "deploy",
+        "--stack-name",
+        stack_name,
+        "--region",
+        region,
         "--resolve-s3",
-        "--capabilities", "CAPABILITY_IAM",
+        "--capabilities",
+        "CAPABILITY_IAM",
         "--no-fail-on-empty-changeset",
-        "--parameter-overrides", f"CognitoDomainPrefix={domain_prefix}",
+        "--parameter-overrides",
+        f"CognitoDomainPrefix={domain_prefix}",
     ]
     if guided:
         deploy_cmd.append("--guided")
@@ -122,9 +160,19 @@ def _sam_deploy(infra_dir, stack_name, region, domain_prefix, guided):
 def _read_stack_outputs(stack_name, region):
     """Read CloudFormation stack outputs, return dict of key→value."""
     result = subprocess.run(
-        ["aws", "cloudformation", "describe-stacks",
-         "--stack-name", stack_name, "--region", region,
-         "--query", "Stacks[0].Outputs", "--output", "json"],
+        [
+            "aws",
+            "cloudformation",
+            "describe-stacks",
+            "--stack-name",
+            stack_name,
+            "--region",
+            region,
+            "--query",
+            "Stacks[0].Outputs",
+            "--output",
+            "json",
+        ],
         capture_output=True,
         text=True,
     )
@@ -163,7 +211,7 @@ def init(region, stack_name, domain_prefix, guided):
         "region": region,
         "user_pool_id": "placeholder",
         "client_id": "placeholder",
-        "client_secret": "placeholder",
+        "secret_arn": "placeholder",
         "cognito_domain": "https://placeholder.auth.us-east-1.amazoncognito.com",
         "callback_url": "https://placeholder.cloudfront.net/_auth/callback",
         "cloudfront_domain": "placeholder.cloudfront.net",
@@ -194,13 +242,22 @@ def init(region, stack_name, domain_prefix, guided):
         console.print("[red]Failed to retrieve Cognito client secret.[/red]")
         raise SystemExit(1)
 
+    # Store client secret in Secrets Manager
+    secret_arn = output_map.get("CognitoClientSecretArn", "")
+    if secret_arn:
+        with console.status("Storing client secret in Secrets Manager..."):
+            if not _store_client_secret_in_sm(region, secret_arn, client_secret):
+                console.print("[red]Failed to store client secret in Secrets Manager.[/red]")
+                raise SystemExit(1)
+        console.print("[green]Client secret stored in Secrets Manager.[/green]")
+
     # ── Phase 2: Re-deploy with real config ───────────────────────────
     console.print("[bold]Phase 2:[/bold] Re-deploying with real configuration...")
     real_config = {
         "region": region,
         "user_pool_id": user_pool_id,
         "client_id": client_id,
-        "client_secret": client_secret,
+        "secret_arn": secret_arn,
         "cognito_domain": f"https://{cognito_domain_prefix}.auth.{region}.amazoncognito.com",
         "callback_url": f"https://{cloudfront_domain}/_auth/callback",
         "cloudfront_domain": cloudfront_domain,
@@ -224,6 +281,7 @@ def init(region, stack_name, domain_prefix, guided):
         "cognito_user_pool_id": user_pool_id,
         "cognito_client_id": client_id,
         "cognito_domain_prefix": cognito_domain_prefix,
+        "cognito_secret_arn": secret_arn,
     }
     set_aws_config(aws_config)
     console.print("[green]AWS config saved to ~/.tinygo/config.yaml[/green]")
@@ -247,15 +305,13 @@ def init(region, stack_name, domain_prefix, guided):
 def deploy(file, site, no_bundle, no_invalidate):
     """Deploy a file or HTML project to AWS."""
     from pathlib import Path
+
     from tinygo.bundle import cleanup_bundle_dir, create_bundle_dir
 
     client = _get_aws_client()
 
     if client.site_exists(site):
-        console.print(
-            f"[red]Site '{site}' already exists.[/red] "
-            "Use [bold]tinygo aws update[/bold] instead."
-        )
+        console.print(f"[red]Site '{site}' already exists.[/red] Use [bold]tinygo aws update[/bold] instead.")
         raise SystemExit(1)
 
     staging_dir = None
@@ -289,6 +345,7 @@ def deploy(file, site, no_bundle, no_invalidate):
     except Exception as e:
         if not isinstance(e, SystemExit):
             from tinygo.aws_client import AWSError
+
             detail = e.detail if isinstance(e, AWSError) else str(e)
             log_event("AWS_DEPLOY", site, success=False, file_path=file, error=detail)
             console.print(f"[red]Deploy failed:[/red] {detail}")
@@ -310,15 +367,13 @@ def deploy(file, site, no_bundle, no_invalidate):
 def update(file, site, no_bundle, no_invalidate):
     """Update an existing AWS-hosted site with new content."""
     from pathlib import Path
+
     from tinygo.bundle import cleanup_bundle_dir, create_bundle_dir
 
     client = _get_aws_client()
 
     if not client.site_exists(site):
-        console.print(
-            f"[red]Site '{site}' does not exist.[/red] "
-            "Use [bold]tinygo aws deploy[/bold] first."
-        )
+        console.print(f"[red]Site '{site}' does not exist.[/red] Use [bold]tinygo aws deploy[/bold] first.")
         raise SystemExit(1)
 
     staging_dir = None
@@ -351,6 +406,7 @@ def update(file, site, no_bundle, no_invalidate):
     except Exception as e:
         if not isinstance(e, SystemExit):
             from tinygo.aws_client import AWSError
+
             detail = e.detail if isinstance(e, AWSError) else str(e)
             log_event("AWS_UPDATE", site, success=False, file_path=file, error=detail)
             console.print(f"[red]Update failed:[/red] {detail}")

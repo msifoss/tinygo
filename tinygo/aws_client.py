@@ -1,5 +1,7 @@
 """AWS client for S3 + CloudFront site hosting."""
 
+from __future__ import annotations
+
 import mimetypes
 from pathlib import Path
 
@@ -141,9 +143,7 @@ class AWSClient:
         """Return *True* if at least one object exists under ``sites/{site_name}/``."""
         prefix = f"{S3_PREFIX}/{site_name}/"
         try:
-            resp = self.s3.list_objects_v2(
-                Bucket=self.bucket_name, Prefix=prefix, MaxKeys=1
-            )
+            resp = self.s3.list_objects_v2(Bucket=self.bucket_name, Prefix=prefix, MaxKeys=1)
         except ClientError as e:
             raise AWSError(f"S3 check failed: {e}", original=e) from e
         return resp.get("KeyCount", 0) > 0

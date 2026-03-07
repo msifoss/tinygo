@@ -1,7 +1,6 @@
 """Tests for tinygo.config module."""
 
 import json
-import os
 
 import pytest
 

@@ -24,10 +24,10 @@ def project_dir(tmp_path):
     (tmp_path / "script.js").write_text("console.log('hi');")
 
     (tmp_path / "index.html").write_text(
-        '<html><head>'
+        "<html><head>"
         '<link rel="stylesheet" href="css/style.css">'
         '<script src="script.js"></script>'
-        '</head><body>Hello</body></html>'
+        "</head><body>Hello</body></html>"
     )
     return tmp_path
 
@@ -41,32 +41,28 @@ def test_scan_html_finds_refs(project_dir):
 
 def test_scan_html_skips_remote_urls(tmp_path):
     (tmp_path / "test.html").write_text(
-        '<html><head>'
+        "<html><head>"
         '<link rel="stylesheet" href="https://cdn.example.com/style.css">'
         '<script src="http://example.com/app.js"></script>'
         '<a href="mailto:a@b.com">email</a>'
         '<a href="#section">anchor</a>'
         '<a href="javascript:void(0)">js</a>'
         '<a href="data:text/html,hello">data</a>'
-        '</head></html>'
+        "</head></html>"
     )
     refs = scan_html(tmp_path / "test.html")
     assert refs == []
 
 
 def test_scan_html_skips_missing_files(tmp_path):
-    (tmp_path / "test.html").write_text(
-        '<html><script src="nonexistent.js"></script></html>'
-    )
+    (tmp_path / "test.html").write_text('<html><script src="nonexistent.js"></script></html>')
     refs = scan_html(tmp_path / "test.html")
     assert refs == []
 
 
 def test_scan_html_finds_css_url(tmp_path):
     (tmp_path / "bg.png").write_text("fake png")
-    (tmp_path / "test.html").write_text(
-        '<html><style>body { background: url("bg.png"); }</style></html>'
-    )
+    (tmp_path / "test.html").write_text('<html><style>body { background: url("bg.png"); }</style></html>')
     refs = scan_html(tmp_path / "test.html")
     raw_refs = [r for r, _p in refs]
     assert "bg.png" in raw_refs
@@ -108,9 +104,7 @@ def test_create_bundle_with_absolute_path(tmp_path):
     (external / "report.html").write_text("<html>Report</html>")
     abs_path = str((external / "report.html").resolve())
 
-    (project / "index.html").write_text(
-        f'<html><a href="{abs_path}">Report</a></html>'
-    )
+    (project / "index.html").write_text(f'<html><a href="{abs_path}">Report</a></html>')
 
     zip_path = create_bundle(project / "index.html")
     try:
@@ -130,12 +124,8 @@ def test_create_bundle_recursive_html(tmp_path):
     """Linked HTML files are scanned recursively."""
     (tmp_path / "style.css").write_text("body {}")
 
-    (tmp_path / "page2.html").write_text(
-        '<html><link rel="stylesheet" href="style.css"></html>'
-    )
-    (tmp_path / "index.html").write_text(
-        '<html><a href="page2.html">Page 2</a></html>'
-    )
+    (tmp_path / "page2.html").write_text('<html><link rel="stylesheet" href="style.css"></html>')
+    (tmp_path / "index.html").write_text('<html><a href="page2.html">Page 2</a></html>')
 
     zip_path = create_bundle(tmp_path / "index.html")
     try:

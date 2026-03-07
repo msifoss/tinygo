@@ -1,11 +1,14 @@
 """Configuration management for TinyGo CLI."""
 
+from __future__ import annotations
+
 import json
 import os
 from pathlib import Path
 
 import yaml
-from dotenv import dotenv_values, set_key as dotenv_set_key
+from dotenv import dotenv_values
+from dotenv import set_key as dotenv_set_key
 
 CONFIG_DIR = Path.home() / ".tinygo"
 ENV_FILE = CONFIG_DIR / ".env"

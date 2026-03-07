@@ -5,8 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tinygo.aws_client import AWSClient, AWSError, S3_PREFIX, _content_type
-
+from tinygo.aws_client import S3_PREFIX, AWSClient, AWSError, _content_type
 
 # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -27,9 +26,7 @@ def aws(staging_dir):
     with patch("tinygo.aws_client.boto3") as mock_boto:
         mock_s3 = MagicMock()
         mock_cf = MagicMock()
-        mock_boto.client.side_effect = lambda svc, **kw: (
-            mock_s3 if svc == "s3" else mock_cf
-        )
+        mock_boto.client.side_effect = lambda svc, **kw: mock_s3 if svc == "s3" else mock_cf
         client = AWSClient(
             region="us-east-1",
             bucket_name="test-bucket",
@@ -94,9 +91,7 @@ def test_upload_site_sets_content_type(aws, staging_dir):
 def test_upload_site_raises_aws_error(aws, staging_dir):
     from botocore.exceptions import ClientError
 
-    aws._mock_s3.upload_file.side_effect = ClientError(
-        {"Error": {"Code": "403", "Message": "Forbidden"}}, "PutObject"
-    )
+    aws._mock_s3.upload_file.side_effect = ClientError({"Error": {"Code": "403", "Message": "Forbidden"}}, "PutObject")
     with pytest.raises(AWSError, match="S3 upload failed"):
         aws.upload_site("my-site", staging_dir)
 
@@ -105,18 +100,14 @@ def test_upload_site_raises_aws_error(aws, staging_dir):
 
 
 def test_invalidate_cache_returns_id(aws):
-    aws._mock_cf.create_invalidation.return_value = {
-        "Invalidation": {"Id": "INV123"}
-    }
+    aws._mock_cf.create_invalidation.return_value = {"Invalidation": {"Id": "INV123"}}
     inv_id = aws.invalidate_cache("my-site")
     assert inv_id == "INV123"
     aws._mock_cf.create_invalidation.assert_called_once()
 
 
 def test_invalidate_cache_sends_correct_path(aws):
-    aws._mock_cf.create_invalidation.return_value = {
-        "Invalidation": {"Id": "INV1"}
-    }
+    aws._mock_cf.create_invalidation.return_value = {"Invalidation": {"Id": "INV1"}}
     aws.invalidate_cache("my-site")
     call_args = aws._mock_cf.create_invalidation.call_args
     paths = call_args.kwargs.get("InvalidationBatch", call_args[1].get("InvalidationBatch", {}))["Paths"]["Items"]
@@ -138,9 +129,7 @@ def test_invalidate_cache_raises_aws_error(aws):
 
 def test_delete_site_deletes_objects(aws):
     paginator = MagicMock()
-    paginator.paginate.return_value = [
-        {"Contents": [{"Key": "sites/x/index.html"}, {"Key": "sites/x/style.css"}]}
-    ]
+    paginator.paginate.return_value = [{"Contents": [{"Key": "sites/x/index.html"}, {"Key": "sites/x/style.css"}]}]
     aws._mock_s3.get_paginator.return_value = paginator
 
     count = aws.delete_site("x")

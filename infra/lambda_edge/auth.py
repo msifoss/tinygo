@@ -14,7 +14,6 @@ import hmac
 import json
 import os
 import re
-import struct
 import time
 import urllib.parse
 import urllib.request
@@ -26,6 +25,9 @@ _CONFIG = None
 _JWKS_CACHE = None
 _JWKS_CACHE_TIME = 0
 _JWKS_TTL = 3600  # Re-fetch JWKS after 1 hour
+_CLIENT_SECRET_CACHE = None
+_CLIENT_SECRET_CACHE_TIME = 0
+_CLIENT_SECRET_TTL = 3600  # 1 hour, matches JWKS
 
 
 def _load_config():
@@ -33,6 +35,35 @@ def _load_config():
     if _CONFIG is None:
         _CONFIG = json.loads(_CONFIG_PATH.read_text())
     return _CONFIG
+
+
+def _get_client_secret(config):
+    """Fetch the Cognito client secret from Secrets Manager (with caching).
+
+    Falls back to config["client_secret"] when secret_arn is absent (backward
+    compat) or when Secrets Manager is unreachable.
+    """
+    global _CLIENT_SECRET_CACHE, _CLIENT_SECRET_CACHE_TIME
+
+    secret_arn = config.get("secret_arn")
+    if not secret_arn:
+        return config.get("client_secret", "")
+
+    if _CLIENT_SECRET_CACHE is not None and (time.time() - _CLIENT_SECRET_CACHE_TIME) < _CLIENT_SECRET_TTL:
+        return _CLIENT_SECRET_CACHE
+
+    try:
+        import boto3
+
+        client = boto3.client("secretsmanager", region_name=config.get("region", "us-east-1"))
+        resp = client.get_secret_value(SecretId=secret_arn)
+        _CLIENT_SECRET_CACHE = resp["SecretString"]
+        _CLIENT_SECRET_CACHE_TIME = time.time()
+        return _CLIENT_SECRET_CACHE
+    except Exception:
+        if _CLIENT_SECRET_CACHE is not None:
+            return _CLIENT_SECRET_CACHE
+        return config.get("client_secret", "")
 
 
 def _get_jwks(region, user_pool_id):
@@ -126,11 +157,29 @@ def _verify_rs256(token, jwks):
 
     # PKCS#1 v1.5 padding: 0x00 0x01 [0xff padding] 0x00 [DigestInfo + hash]
     # SHA-256 DigestInfo prefix
-    digest_info_prefix = bytes([
-        0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86,
-        0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05,
-        0x00, 0x04, 0x20
-    ])
+    digest_info_prefix = bytes(
+        [
+            0x30,
+            0x31,
+            0x30,
+            0x0D,
+            0x06,
+            0x09,
+            0x60,
+            0x86,
+            0x48,
+            0x01,
+            0x65,
+            0x03,
+            0x04,
+            0x02,
+            0x01,
+            0x05,
+            0x00,
+            0x04,
+            0x20,
+        ]
+    )
     expected_suffix = digest_info_prefix + message_hash
 
     # Check padding structure
@@ -142,7 +191,7 @@ def _verify_rs256(token, jwks):
     # Check that padding bytes between 0x01 and 0x00 separator are all 0xff
     separator_idx = decrypted_bytes.index(0x00, 2)
     padding_bytes = decrypted_bytes[2:separator_idx]
-    if not all(b == 0xff for b in padding_bytes):
+    if not all(b == 0xFF for b in padding_bytes):
         return False
 
     return True
@@ -168,9 +217,7 @@ def _redirect(location, cookies=None):
         "cache-control": [{"key": "Cache-Control", "value": "no-cache, no-store"}],
     }
     if cookies:
-        headers["set-cookie"] = [
-            {"key": "Set-Cookie", "value": c} for c in cookies
-        ]
+        headers["set-cookie"] = [{"key": "Set-Cookie", "value": c} for c in cookies]
     return {
         "status": "302",
         "statusDescription": "Found",
@@ -253,9 +300,9 @@ def _build_state(config, request_uri):
     Format: base64url(JSON({"nonce": ..., "uri": ..., "sig": ...}))
     The sig is HMAC-SHA256(nonce + uri, client_secret).
     """
-    client_secret = config.get("client_secret", "")
+    client_secret = _get_client_secret(config)
     nonce = _base64url_encode(os.urandom(16))
-    message = f"{nonce}:{request_uri}".encode("utf-8")
+    message = f"{nonce}:{request_uri}".encode()
     sig = hmac.new(client_secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
     payload = json.dumps({"nonce": nonce, "uri": request_uri, "sig": sig})
     return _base64url_encode(payload.encode("utf-8"))
@@ -263,7 +310,7 @@ def _build_state(config, request_uri):
 
 def _verify_state(config, state):
     """Verify the signed state parameter. Returns the original URI or None."""
-    client_secret = config.get("client_secret", "")
+    client_secret = _get_client_secret(config)
     try:
         payload = json.loads(_base64url_decode(state).decode("utf-8"))
     except Exception:
@@ -271,7 +318,7 @@ def _verify_state(config, state):
     nonce = payload.get("nonce", "")
     uri = payload.get("uri", "/")
     sig = payload.get("sig", "")
-    message = f"{nonce}:{uri}".encode("utf-8")
+    message = f"{nonce}:{uri}".encode()
     expected = hmac.new(client_secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(sig, expected):
         return None
@@ -286,13 +333,15 @@ def _build_login_url(config, request_uri):
 
     state = _build_state(config, request_uri)
 
-    params = urllib.parse.urlencode({
-        "response_type": "code",
-        "client_id": client_id,
-        "redirect_uri": callback_url,
-        "scope": "openid email profile",
-        "state": state,
-    })
+    params = urllib.parse.urlencode(
+        {
+            "response_type": "code",
+            "client_id": client_id,
+            "redirect_uri": callback_url,
+            "scope": "openid email profile",
+            "state": state,
+        }
+    )
     return f"{cognito_domain}/login?{params}"
 
 
@@ -303,21 +352,21 @@ def _exchange_code_for_tokens(code, config):
     """
     cognito_domain = config["cognito_domain"]
     client_id = config["client_id"]
-    client_secret = config["client_secret"]
+    client_secret = _get_client_secret(config)
     callback_url = config["callback_url"]
 
     token_url = f"{cognito_domain}/oauth2/token"
-    body = urllib.parse.urlencode({
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": callback_url,
-        "client_id": client_id,
-    })
+    body = urllib.parse.urlencode(
+        {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": callback_url,
+            "client_id": client_id,
+        }
+    )
 
     # Basic auth header: base64(client_id:client_secret)
-    credentials = base64.b64encode(
-        f"{client_id}:{client_secret}".encode("utf-8")
-    ).decode("ascii")
+    credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode("ascii")
 
     req = urllib.request.Request(
         token_url,
@@ -372,7 +421,7 @@ def _handle_callback(request, config):
         cookies.append(f"tinygo_access_token={tokens['access_token']}; {cookie_attrs}")
     if tokens.get("refresh_token"):
         # Refresh tokens last longer
-        refresh_attrs = f"Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=2592000"
+        refresh_attrs = "Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=2592000"
         cookies.append(f"tinygo_refresh_token={tokens['refresh_token']}; {refresh_attrs}")
 
     cloudfront_domain = config.get("cloudfront_domain", "")
@@ -398,7 +447,6 @@ def handler(event, context):
     except FileNotFoundError:
         return _unauthorized("Auth configuration missing")
 
-    region = config.get("region", "us-east-1")
     user_pool_id = config.get("user_pool_id")
     client_id = config.get("client_id")
 

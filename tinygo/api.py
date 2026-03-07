@@ -1,5 +1,7 @@
 """API client for the tiiny.host external API."""
 
+from __future__ import annotations
+
 import json
 import secrets
 import string

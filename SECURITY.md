@@ -13,7 +13,8 @@ TinyGo is a CLI client that communicates with the tiiny.host external API and op
 | Bundle mode file access | Path traversal | Only follows references found in HTML; skips remote URLs |
 | Deployment log | Sensitive data leakage | Log records domain and filename only — no API keys, passwords, or file contents (REQ-SEC-004) |
 | AWS credentials | IAM access | Uses default AWS credential chain (aws configure / env vars); no credentials stored by TinyGo |
-| Cognito client secret | Secret in Lambda package | Baked into `config.json` inside Lambda@Edge deployment package at build time (REQ-SEC-006) |
+| Cognito client secret | Secret exposure | Stored in AWS Secrets Manager; Lambda@Edge fetches via API with 1-hour cache; config.json contains only the secret ARN (REQ-SEC-006) |
+| Lambda@Edge IAM role | Over-privileged access | Custom inline policy scoped to single Secrets Manager secret ARN; managed policy limited to basic execution (REQ-SEC-014) |
 | Lambda@Edge JWT auth | Token bypass | RS256 signature verification against Cognito JWKS; validates exp, iss, aud claims (REQ-SEC-007) |
 | Cookie-based auth | Session hijacking | Cookies set with Secure, HttpOnly, SameSite=Lax attributes (REQ-SEC-008) |
 | OAuth2 callback | CSRF / code injection | State parameter encodes original URI; authorization code exchanged server-side (REQ-SEC-009) |
@@ -43,8 +44,7 @@ TinyGo is a CLI client that communicates with the tiiny.host external API and op
 
 ## Known Limitations
 
-- Cognito client secret is embedded in Lambda@Edge deployment package — accessible to anyone with Lambda read access (REQ-SEC-006 — consider Secrets Manager in future)
-- Lambda@Edge IAM role uses managed `AWSLambdaBasicExecutionRole` — minimal, but no custom policy restricting scope (REQ-SEC-014)
+No known security limitations at this time. All previously open items (REQ-SEC-006, REQ-SEC-014) have been resolved.
 
 ## Vulnerability Reporting
 
@@ -60,6 +60,7 @@ We will acknowledge receipt within 48 hours and aim to provide a fix or mitigati
 
 | Date | Type | Scope | Findings |
 |------|------|-------|----------|
+| 2026-03-04 | Secrets Manager + IAM | template.yaml, auth.py, aws_cli.py | Resolved REQ-SEC-006 (client secret moved to Secrets Manager with caching), REQ-SEC-014 (custom IAM policy scoped to single secret ARN); 0 open items |
 | 2026-03-02 | Security hardening | config.py, bundle.py, auth.py, api.py | Fixed REQ-SEC-002 (.env permissions), REQ-SEC-005 (symlink guard), REQ-SEC-012 (JWKS TTL), REQ-SEC-013 (CSRF nonce); added request timeout (B-004); 2 open items remain (REQ-SEC-006, REQ-SEC-014) |
 | 2026-03-02 | AWS module review | aws_cli.py, aws_client.py, Lambda@Edge auth, SAM template | 4 new items (REQ-SEC-006, REQ-SEC-012, REQ-SEC-013, REQ-SEC-014); 6 new controls documented (REQ-SEC-006–011) |
 | 2026-03-01 | Initial assessment | All modules | 2 open items (REQ-SEC-002, REQ-SEC-005) |

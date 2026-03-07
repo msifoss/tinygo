@@ -1,5 +1,7 @@
 # TinyGo
 
+[![CI](https://github.com/msifoss/tinygo/actions/workflows/ci.yml/badge.svg)](https://github.com/msifoss/tinygo/actions/workflows/ci.yml)
+
 **Deploy web pages to [tiiny.host](https://tiiny.host) from your terminal.**
 
 TinyGo is a command-line tool that wraps the tiiny.host API, giving you fast, scriptable deployments for static HTML files and zip archives — no browser required.
@@ -26,11 +28,20 @@ TinyGo is a command-line tool that wraps the tiiny.host API, giving you fast, sc
 **Requirements:** Python 3.9+
 
 ```bash
-# Clone the repo
+pip install tinygo
+```
+
+For AWS backend support:
+
+```bash
+pip install tinygo[aws]
+```
+
+### From source
+
+```bash
 git clone https://github.com/msifoss/tinygo.git
 cd tinygo
-
-# Create a virtual environment and install
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .

@@ -7,15 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Cognito client secret migrated from Lambda@Edge deployment package to AWS Secrets Manager with caching and backward-compat fallback (B-011)
+- Custom IAM inline policy for Lambda@Edge role — scoped to single Secrets Manager secret ARN (B-012)
+- GitHub Actions CI pipeline — lint (ruff) + test matrix (Python 3.9, 3.11, 3.12, 3.13) (B-002)
+- GitHub Actions release workflow — build + publish to PyPI via trusted publisher (B-001)
+- MIT LICENSE file
+- `dev` optional dependency group (`pytest>=7.0`, `ruff>=0.4`)
+- ruff configuration in pyproject.toml (target Python 3.9, line-length 120)
+- pytest configuration in pyproject.toml
+- PyPI metadata: readme, license, authors, keywords, classifiers, project URLs
+- CI badge in README.md
+- `pip install tinygo` as primary installation method in README.md
+
 ### Fixed
+- `from __future__ import annotations` added to all source modules for Python 3.9 compatibility
 - `.env` file now created with `0o600` permissions — owner-only read/write (REQ-SEC-002)
 - Symlinks resolving outside the entry HTML's directory are now rejected during bundling (REQ-SEC-005)
 - JWKS cache in Lambda@Edge now refreshes after 1 hour instead of persisting for Lambda lifetime (REQ-SEC-012)
 - OAuth2 callback state parameter is now HMAC-signed with a cryptographic nonce to prevent CSRF (REQ-SEC-013)
+- Unused imports and variables cleaned up by ruff
 
 ### Changed
 - All TiinyClient HTTP calls now have a 30-second timeout (B-004)
-- Test count: 110 → 111
+- Lambda@Edge `config.json` now contains `secret_arn` instead of `client_secret` (B-011)
+- `tinygo aws init` stores Cognito client secret in Secrets Manager and saves ARN in local config (B-011)
+- Test count: 111 → 118
 
 ## [0.5.0] - 2026-03-01
 

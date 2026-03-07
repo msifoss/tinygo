@@ -142,6 +142,14 @@ Resources:
       LogoutURLs:
         - !Sub "https://${Distribution.DomainName}/"
 
+  # ── Secrets Manager ──────────────────────────────────────────────────
+  CognitoClientSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "tinygo/${AWS::StackName}/cognito-client-secret"
+      Description: Cognito app client secret for Lambda@Edge auth
+      SecretString: "placeholder"
+
   # ── Lambda@Edge ──────────────────────────────────────────────────────
   AuthFunctionRole:
     Type: AWS::IAM::Role
@@ -157,6 +165,14 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: TinyGoAuthSecrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref CognitoClientSecret
 
   AuthFunction:
     Type: AWS::Serverless::Function
@@ -197,3 +213,7 @@ Outputs:
   CognitoDomainPrefix:
     Description: Cognito Hosted UI domain prefix
     Value: !Ref CognitoDomainPrefix
+
+  CognitoClientSecretArn:
+    Description: ARN of the Secrets Manager secret for Cognito client secret
+    Value: !Ref CognitoClientSecret

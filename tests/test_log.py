@@ -80,10 +80,7 @@ def test_clear_log_when_no_file(isolated_log):
 
 def test_log_event_no_secrets(isolated_log):
     """Verify API keys and passwords are never written to the log."""
-    log_event(
-        "DEPLOY", "my-site", success=True,
-        file_path=None, url="https://my-site.tiiny.site"
-    )
+    log_event("DEPLOY", "my-site", success=True, file_path=None, url="https://my-site.tiiny.site")
     content = (isolated_log / "deployments.log").read_text()
     # Log should not contain any key-like patterns
     assert "api_key" not in content.lower()

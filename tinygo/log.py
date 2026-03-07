@@ -1,6 +1,7 @@
 """Deployment event logging for TinyGo CLI."""
 
-import os
+from __future__ import annotations
+
 from datetime import datetime
 from pathlib import Path
 

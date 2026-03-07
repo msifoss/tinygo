@@ -21,12 +21,26 @@ def _reset_globals():
     """Reset module-level caches between tests."""
     auth._CONFIG = None
     auth._JWKS_CACHE = None
+    auth._CLIENT_SECRET_CACHE = None
+    auth._CLIENT_SECRET_CACHE_TIME = 0
     yield
     auth._CONFIG = None
     auth._JWKS_CACHE = None
+    auth._CLIENT_SECRET_CACHE = None
+    auth._CLIENT_SECRET_CACHE_TIME = 0
 
 
 SAMPLE_CONFIG = {
+    "region": "us-east-1",
+    "user_pool_id": "us-east-1_TestPool",
+    "client_id": "test-client-id",
+    "secret_arn": "arn:aws:secretsmanager:us-east-1:123456:secret:tinygo/test",
+    "cognito_domain": "https://myapp.auth.us-east-1.amazoncognito.com",
+    "callback_url": "https://d111.cloudfront.net/_auth/callback",
+    "cloudfront_domain": "d111.cloudfront.net",
+}
+
+SAMPLE_CONFIG_LEGACY = {
     "region": "us-east-1",
     "user_pool_id": "us-east-1_TestPool",
     "client_id": "test-client-id",
@@ -37,18 +51,27 @@ SAMPLE_CONFIG = {
 }
 
 
+@pytest.fixture()
+def mock_client_secret():
+    """Patch _get_client_secret to return a fixed value."""
+    with patch.object(auth, "_get_client_secret", return_value="test-client-secret"):
+        yield
+
+
 def _make_event(uri="/", headers=None, querystring=""):
     """Build a minimal CloudFront viewer-request event."""
     return {
-        "Records": [{
-            "cf": {
-                "request": {
-                    "uri": uri,
-                    "headers": headers or {},
-                    "querystring": querystring,
+        "Records": [
+            {
+                "cf": {
+                    "request": {
+                        "uri": uri,
+                        "headers": headers or {},
+                        "querystring": querystring,
+                    }
                 }
             }
-        }]
+        ]
     }
 
 
@@ -61,7 +84,7 @@ def _make_jwt(payload_overrides=None, kid="test-kid"):
     header = {"alg": "RS256", "kid": kid}
     payload = {
         "sub": "user-123",
-        "iss": f"https://cognito-idp.us-east-1.amazonaws.com/us-east-1_TestPool",
+        "iss": "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_TestPool",
         "aud": "test-client-id",
         "exp": int(time.time()) + 3600,
         "iat": int(time.time()),
@@ -103,8 +126,10 @@ def test_bearer_token_valid():
     headers = {"authorization": [{"value": f"Bearer {token}"}]}
     event = _make_event(headers=headers)
 
-    with patch.object(auth, "_load_config", return_value=SAMPLE_CONFIG), \
-         patch.object(auth, "_validate_jwt", return_value=({"alg": "RS256"}, {"sub": "u"})):
+    with (
+        patch.object(auth, "_load_config", return_value=SAMPLE_CONFIG),
+        patch.object(auth, "_validate_jwt", return_value=({"alg": "RS256"}, {"sub": "u"})),
+    ):
         result = auth.handler(event, None)
 
     # Should return the request object (forwarded to origin)
@@ -117,8 +142,10 @@ def test_bearer_token_invalid():
     headers = {"authorization": [{"value": "Bearer bad-token"}]}
     event = _make_event(headers=headers)
 
-    with patch.object(auth, "_load_config", return_value=SAMPLE_CONFIG), \
-         patch.object(auth, "_validate_jwt", return_value=None):
+    with (
+        patch.object(auth, "_load_config", return_value=SAMPLE_CONFIG),
+        patch.object(auth, "_validate_jwt", return_value=None),
+    ):
         result = auth.handler(event, None)
 
     assert result["status"] == "401"
@@ -134,20 +161,24 @@ def test_cookie_auth_valid():
     headers = {"cookie": [{"value": f"tinygo_id_token={token}; other=val"}]}
     event = _make_event(headers=headers)
 
-    with patch.object(auth, "_load_config", return_value=SAMPLE_CONFIG), \
-         patch.object(auth, "_validate_jwt", return_value=({"alg": "RS256"}, {"sub": "u"})):
+    with (
+        patch.object(auth, "_load_config", return_value=SAMPLE_CONFIG),
+        patch.object(auth, "_validate_jwt", return_value=({"alg": "RS256"}, {"sub": "u"})),
+    ):
         result = auth.handler(event, None)
 
     assert "uri" in result
 
 
-def test_cookie_auth_invalid_redirects_to_login():
+def test_cookie_auth_invalid_redirects_to_login(mock_client_secret):
     """Invalid/expired cookie token redirects to Cognito login."""
     headers = {"cookie": [{"value": "tinygo_id_token=expired-token"}]}
     event = _make_event(uri="/page.html", headers=headers)
 
-    with patch.object(auth, "_load_config", return_value=SAMPLE_CONFIG), \
-         patch.object(auth, "_validate_jwt", return_value=None):
+    with (
+        patch.object(auth, "_load_config", return_value=SAMPLE_CONFIG),
+        patch.object(auth, "_validate_jwt", return_value=None),
+    ):
         result = auth.handler(event, None)
 
     assert result["status"] == "302"
@@ -158,7 +189,7 @@ def test_cookie_auth_invalid_redirects_to_login():
 # ── Login redirect ────────────────────────────────────────────────────────
 
 
-def test_no_auth_redirects_to_login():
+def test_no_auth_redirects_to_login(mock_client_secret):
     """No auth header and no cookie redirects to Cognito Hosted UI."""
     event = _make_event(uri="/sites/mysite/index.html")
 
@@ -173,7 +204,7 @@ def test_no_auth_redirects_to_login():
     assert "state=" in location
 
 
-def test_login_redirect_state_encodes_original_uri():
+def test_login_redirect_state_encodes_original_uri(mock_client_secret):
     """State parameter in login redirect contains a signed state with the original URI."""
     event = _make_event(uri="/sites/mysite/page.html")
 
@@ -183,6 +214,7 @@ def test_login_redirect_state_encodes_original_uri():
     location = result["headers"]["location"][0]["value"]
     # Extract state param
     import urllib.parse
+
     parsed = urllib.parse.urlparse(location)
     params = urllib.parse.parse_qs(parsed.query)
     state = params["state"][0]
@@ -206,7 +238,7 @@ def test_callback_missing_code_returns_401():
     assert "Missing authorization code" in result["body"]
 
 
-def test_callback_exchange_failure_returns_401():
+def test_callback_exchange_failure_returns_401(mock_client_secret):
     """Callback returns 401 when token exchange fails."""
     state = auth._build_state(SAMPLE_CONFIG, "/page.html")
     event = _make_event(
@@ -214,15 +246,17 @@ def test_callback_exchange_failure_returns_401():
         querystring=f"code=auth-code-123&state={state}",
     )
 
-    with patch.object(auth, "_load_config", return_value=SAMPLE_CONFIG), \
-         patch.object(auth, "_exchange_code_for_tokens", return_value=None):
+    with (
+        patch.object(auth, "_load_config", return_value=SAMPLE_CONFIG),
+        patch.object(auth, "_exchange_code_for_tokens", return_value=None),
+    ):
         result = auth.handler(event, None)
 
     assert result["status"] == "401"
     assert "Token exchange failed" in result["body"]
 
 
-def test_callback_success_sets_cookies_and_redirects():
+def test_callback_success_sets_cookies_and_redirects(mock_client_secret):
     """Successful callback sets cookie and redirects to original URI."""
     original_uri = "/sites/mysite/index.html"
     state = auth._build_state(SAMPLE_CONFIG, original_uri)
@@ -238,8 +272,10 @@ def test_callback_success_sets_cookies_and_redirects():
         "expires_in": 3600,
     }
 
-    with patch.object(auth, "_load_config", return_value=SAMPLE_CONFIG), \
-         patch.object(auth, "_exchange_code_for_tokens", return_value=token_response):
+    with (
+        patch.object(auth, "_load_config", return_value=SAMPLE_CONFIG),
+        patch.object(auth, "_exchange_code_for_tokens", return_value=token_response),
+    ):
         result = auth.handler(event, None)
 
     assert result["status"] == "302"
@@ -262,7 +298,7 @@ def test_callback_success_sets_cookies_and_redirects():
     assert "Max-Age=3600" in id_cookie
 
 
-def test_callback_no_state_returns_401():
+def test_callback_no_state_returns_401(mock_client_secret):
     """Callback without state param returns 401 (CSRF protection)."""
     event = _make_event(
         uri="/_auth/callback",
@@ -276,7 +312,7 @@ def test_callback_no_state_returns_401():
     assert "Missing state" in result["body"]
 
 
-def test_callback_invalid_state_returns_401():
+def test_callback_invalid_state_returns_401(mock_client_secret):
     """Callback with tampered state param returns 401."""
     event = _make_event(
         uri="/_auth/callback",
@@ -343,3 +379,66 @@ def test_validate_jwt_claims_valid():
         "aud": "test-client-id",
     }
     assert auth._validate_jwt_claims(payload, SAMPLE_CONFIG) is True
+
+
+# ── _get_client_secret ────────────────────────────────────────────────
+
+
+def test_get_client_secret_legacy_fallback():
+    """Falls back to config client_secret when secret_arn is absent."""
+    result = auth._get_client_secret(SAMPLE_CONFIG_LEGACY)
+    assert result == "test-client-secret"
+
+
+def test_get_client_secret_fetches_from_sm():
+    """Fetches secret from Secrets Manager when secret_arn is present."""
+    mock_sm = MagicMock()
+    mock_sm.get_secret_value.return_value = {"SecretString": "sm-secret-value"}
+
+    with patch.dict("sys.modules", {"boto3": MagicMock(client=MagicMock(return_value=mock_sm))}):
+        result = auth._get_client_secret(SAMPLE_CONFIG)
+
+    assert result == "sm-secret-value"
+
+
+def test_get_client_secret_caches_value():
+    """Caches the secret and returns cached value on subsequent calls."""
+    mock_sm = MagicMock()
+    mock_sm.get_secret_value.return_value = {"SecretString": "cached-secret"}
+
+    with patch.dict("sys.modules", {"boto3": MagicMock(client=MagicMock(return_value=mock_sm))}):
+        first = auth._get_client_secret(SAMPLE_CONFIG)
+        second = auth._get_client_secret(SAMPLE_CONFIG)
+
+    assert first == "cached-secret"
+    assert second == "cached-secret"
+    # Only fetched once — second call used cache
+    mock_sm.get_secret_value.assert_called_once()
+
+
+def test_get_client_secret_returns_stale_cache_on_error():
+    """Returns stale cached value when Secrets Manager fails."""
+    # Pre-populate cache
+    auth._CLIENT_SECRET_CACHE = "stale-secret"
+    auth._CLIENT_SECRET_CACHE_TIME = 0  # expired
+
+    mock_boto3 = MagicMock()
+    mock_boto3.client.return_value.get_secret_value.side_effect = Exception("SM unavailable")
+
+    with patch.dict("sys.modules", {"boto3": mock_boto3}):
+        result = auth._get_client_secret(SAMPLE_CONFIG)
+
+    assert result == "stale-secret"
+
+
+def test_get_client_secret_fallback_on_error_no_cache():
+    """Falls back to config client_secret when SM fails and no cache exists."""
+    config_with_fallback = {**SAMPLE_CONFIG, "client_secret": "fallback-secret"}
+
+    mock_boto3 = MagicMock()
+    mock_boto3.client.return_value.get_secret_value.side_effect = Exception("SM unavailable")
+
+    with patch.dict("sys.modules", {"boto3": mock_boto3}):
+        result = auth._get_client_secret(config_with_fallback)
+
+    assert result == "fallback-secret"
